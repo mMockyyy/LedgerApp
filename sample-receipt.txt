@@ -1,0 +1,5 @@
+Demo Market
+Date: 2026-03-14
+Item A 7.25
+Item B 5.25
+Total: 12.50

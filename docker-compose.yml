@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    container_name: ledgerapp-api
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: ledgerapp-redis
+    ports:
+      - "6379:6379"

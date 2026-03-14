@@ -1,0 +1,9 @@
+SPS
+FARETYPE : STUDENT
+Amount Due : P63
+Date : 2026-03-13
+Driver : Quilap Quilap, Elmer
+Conductor : Araujo, Alex
+Vehicle : 140930
+From : 1 Sta Cruz/Avenida
+To : 29 Loma De Gato
