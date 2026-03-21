@@ -248,14 +248,29 @@ function extractFirstJsonObject(payload: string) {
   return payload.slice(firstBrace, lastBrace + 1);
 }
 
+function getLlmApiKeys() {
+  const configuredList = (env.LLM_API_KEYS || "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  const combined = [env.LLM_API_KEY, env.OPENAI_API_KEY, ...configuredList]
+    .filter((key): key is string => Boolean(key && key.trim()))
+    .map((key) => key.trim());
+
+  // Keep order but remove duplicates so we don't retry the same key.
+  return Array.from(new Set(combined));
+}
+
+function shouldRetryWithNextKey(statusCode: number) {
+  return statusCode === 401 || statusCode === 402 || statusCode === 403 || statusCode === 429 || statusCode >= 500;
+}
+
 async function parseWithLlm(extractedText: string): Promise<ParserResult | null> {
-  const llmKey = env.LLM_API_KEY || env.OPENAI_API_KEY;
-  if (!llmKey) {
+  const llmKeys = getLlmApiKeys();
+  if (llmKeys.length === 0) {
     return null;
   }
-
-  const isOpenRouterKey = llmKey.startsWith("sk-or-");
-  const llmBaseUrl = env.LLM_BASE_URL || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
   const llmModel = env.LLM_MODEL || env.OPENAI_MODEL;
 
   const prompt = [
@@ -271,76 +286,86 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     extractedText.slice(0, 8000)
   ].join("\n");
 
-  try {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${llmKey}`,
-      "Content-Type": "application/json"
-    };
+  for (const llmKey of llmKeys) {
+    const isOpenRouterKey = llmKey.startsWith("sk-or-");
+    const llmBaseUrl = env.LLM_BASE_URL || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
 
-    if (llmBaseUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "http://localhost";
-      headers["X-Title"] = "LedgerApp Backend";
+    try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${llmKey}`,
+        "Content-Type": "application/json"
+      };
+
+      if (llmBaseUrl.includes("openrouter.ai")) {
+        headers["HTTP-Referer"] = "http://localhost";
+        headers["X-Title"] = "LedgerApp Backend";
+      }
+
+      const response = await fetch(`${llmBaseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: llmModel,
+          temperature: 0,
+          messages: [
+            {
+              role: "system",
+              content: "You are a strict JSON receipt parser. Return JSON only."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        if (shouldRetryWithNextKey(response.status)) {
+          continue;
+        }
+        return null;
+      }
+
+      const data = await response.json() as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        return null;
+      }
+
+      const jsonCandidate = extractFirstJsonObject(content);
+      if (!jsonCandidate) {
+        return null;
+      }
+
+      const parsed = llmReceiptSchema.parse(JSON.parse(jsonCandidate));
+      const normalizedAmount =
+        typeof parsed.amount === "number"
+          ? parsed.amount
+          : typeof parsed.amount === "string"
+            ? parseAmountToken(parsed.amount)
+            : undefined;
+
+      return {
+        extractedText,
+        amount: normalizedAmount,
+        merchant: parsed.merchant?.trim(),
+        category: normalizeCategory(parsed.category) ?? "Uncategorized",
+        incurredAt: normalizeIsoDate(parsed.incurredAt) ?? extractDate(extractedText),
+        parserConfidence: normalizeConfidence(parsed.confidence),
+        parserSource: "llm",
+        llmAttempted: true,
+        llmSucceeded: true
+      };
+    } catch {
+      continue;
     }
-
-    const response = await fetch(`${llmBaseUrl}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: llmModel,
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content: "You are a strict JSON receipt parser. Return JSON only."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      return null;
-    }
-
-    const jsonCandidate = extractFirstJsonObject(content);
-    if (!jsonCandidate) {
-      return null;
-    }
-
-    const parsed = llmReceiptSchema.parse(JSON.parse(jsonCandidate));
-    const normalizedAmount =
-      typeof parsed.amount === "number"
-        ? parsed.amount
-        : typeof parsed.amount === "string"
-          ? parseAmountToken(parsed.amount)
-          : undefined;
-
-    return {
-      extractedText,
-      amount: normalizedAmount,
-      merchant: parsed.merchant?.trim(),
-      category: normalizeCategory(parsed.category) ?? "Uncategorized",
-      incurredAt: normalizeIsoDate(parsed.incurredAt) ?? extractDate(extractedText),
-      parserConfidence: normalizeConfidence(parsed.confidence),
-      parserSource: "llm",
-      llmAttempted: true,
-      llmSucceeded: true
-    };
-  } catch {
-    return null;
   }
+
+  return null;
 }
 
 function mergeHybrid(ruleResult: ParserResult, llmResult: ParserResult | null): ParsedReceipt {

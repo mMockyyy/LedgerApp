@@ -12,6 +12,7 @@ const envSchema = z.object({
   PARSER_MODE: z.enum(["rules", "llm", "hybrid"]).default("rules"),
   LLM_BASE_URL: z.string().optional(),
   LLM_API_KEY: z.string().optional(),
+  LLM_API_KEYS: z.string().optional(),
   LLM_MODEL: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   LLM_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
