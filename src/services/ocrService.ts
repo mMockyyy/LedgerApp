@@ -95,6 +95,21 @@ function normalizeText(rawText: string) {
   return rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
 }
 
+const amountHintRegex = /(amount\s*due|amount|total|fare|balance\s*due|grand\s*total|subtotal|net\s*total)/i;
+const dateHintRegex = /(date|issued|time|day|month|year)/i;
+
+function isLikelyYear(value: number) {
+  return value >= 1900 && value <= 2099;
+}
+
+function isDateLikeLine(line: string) {
+  if (dateHintRegex.test(line)) {
+    return true;
+  }
+
+  return /\b\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}\b|\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/.test(line);
+}
+
 function parseAmountToken(token: string) {
   const cleaned = token.replace(/,/g, "").replace(/[^\d.]/g, "");
   const value = Number.parseFloat(cleaned);
@@ -107,39 +122,84 @@ function extractAmount(text: string) {
     .map((line) => line.trim())
     .filter(Boolean);
 
+  const parseCandidates = (line: string, includePlainIntegers: boolean) => {
+    const tokens: string[] = [];
+
+    for (const match of line.matchAll(/[₱P\$€£]\s*\d+(?:[\.,]\d{2})?/gi)) {
+      tokens.push(match[0]);
+    }
+
+    for (const match of line.matchAll(/\b\d{1,3}(?:,\d{3})*(?:[\.,]\d{2})\b/g)) {
+      tokens.push(match[0]);
+    }
+
+    if (includePlainIntegers) {
+      for (const match of line.matchAll(/\b\d{1,4}\b/g)) {
+        tokens.push(match[0]);
+      }
+    }
+
+    return tokens
+      .map((token) => parseAmountToken(token))
+      .filter((value): value is number => value !== undefined)
+      .filter((value) => !isLikelyYear(value));
+  };
+
   // Highest-priority: explicit amount/total lines on receipts.
   for (const line of lines) {
-    if (/(amount\s*due|amount|total|fare|balance\s*due|grand\s*total|subtotal)/i.test(line)) {
-      const match = line.match(/[₱P\$€£]?\s*\d+(?:[\.,]\d{2})?/i);
-      if (match) {
-        const amount = parseAmountToken(match[0]);
-        if (amount !== undefined) {
-          return amount;
-        }
-      }
+    if (!amountHintRegex.test(line)) {
+      continue;
+    }
+
+    const values = parseCandidates(line, true);
+    if (values.length > 0) {
+      return Math.max(...values);
     }
   }
 
   // Second chance: any currency-prefixed amount in the text.
-  const currencyMatch = text.match(/[₱P\$€£]\s*\d+(?:[\.,]\d{2})?/i);
-  if (currencyMatch) {
-    const amount = parseAmountToken(currencyMatch[0]);
-    if (amount !== undefined) {
-      return amount;
+  const currencyValues = Array.from(text.matchAll(/[₱P\$€£]\s*\d+(?:[\.,]\d{2})?/gi))
+    .map((match) => parseAmountToken(match[0]))
+    .filter((value): value is number => value !== undefined)
+    .filter((value) => !isLikelyYear(value));
+  if (currencyValues.length > 0) {
+    return Math.max(...currencyValues);
+  }
+
+  // Third fallback: decimal amounts from non-date lines.
+  const decimalValues: number[] = [];
+  for (const line of lines) {
+    if (isDateLikeLine(line)) {
+      continue;
+    }
+
+    for (const match of line.matchAll(/\b\d{1,3}(?:,\d{3})*(?:[\.,]\d{2})\b/g)) {
+      const value = parseAmountToken(match[0]);
+      if (value !== undefined && !isLikelyYear(value)) {
+        decimalValues.push(value);
+      }
     }
   }
 
-  // Last fallback: use the largest decimal-looking amount, then largest integer token.
-  const decimalValues = Array.from(text.matchAll(/\d+[\.,]\d{2}/g))
-    .map((match) => parseAmountToken(match[0]))
-    .filter((value): value is number => value !== undefined);
   if (decimalValues.length > 0) {
     return Math.max(...decimalValues);
   }
 
-  const integerValues = Array.from(text.matchAll(/\b\d{1,4}\b/g))
-    .map((match) => parseAmountToken(match[0]))
-    .filter((value): value is number => value !== undefined);
+  // Final fallback: integers only from amount-hint lines and never year-like values.
+  const integerValues: number[] = [];
+  for (const line of lines) {
+    if (!amountHintRegex.test(line) || isDateLikeLine(line)) {
+      continue;
+    }
+
+    for (const match of line.matchAll(/\b\d{1,4}\b/g)) {
+      const value = parseAmountToken(match[0]);
+      if (value !== undefined && !isLikelyYear(value)) {
+        integerValues.push(value);
+      }
+    }
+  }
+
   return integerValues.length > 0 ? Math.max(...integerValues) : undefined;
 }
 
@@ -277,6 +337,7 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     "You extract structured data from receipt OCR text.",
     "Return JSON only with these keys: amount, merchant, category, incurredAt, confidence.",
     "- amount: number",
+    "- never use a year/date value (e.g., 2026) as amount",
     "- merchant: string",
     "- category: one of Food, Transport, Groceries, Health, Entertainment, Uncategorized",
     "- incurredAt: ISO-8601 datetime",

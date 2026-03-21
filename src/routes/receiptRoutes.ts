@@ -16,33 +16,20 @@ import { asyncHandler } from "../utils/asyncHandler";
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
 export const receiptRouter = Router();
 
-receiptRouter.post("/upload", requireAuth, upload.single("receipt"), asyncHandler(async (req, res) => {
-  if (!req.file || !req.userId) {
-    return res.status(400).json({ message: "Missing receipt file" });
+async function processReceiptInBackground(params: {
+  receiptId: string;
+  userId: string;
+  fileName: string;
+  mimeType: string;
+  buffer: Buffer;
+}) {
+  const receipt = await Receipt.findOne({ _id: params.receiptId, userId: params.userId });
+  if (!receipt) {
+    return;
   }
-
-  const receipt = await Receipt.create({
-    userId: req.userId,
-    fileName: req.file.originalname,
-    mimeType: req.file.mimetype,
-    status: "uploaded"
-  });
-
-  const ocrAllowed = await canUseOcr(req.userId);
-  if (!ocrAllowed) {
-    const payload = receiptUploadDisabledResponseSchema.parse({
-      receiptId: receipt.id,
-      status: "uploaded",
-      message: "OCR is disabled for this user"
-    });
-    return res.status(202).json(payload);
-  }
-
-  receipt.status = "processing";
-  await receipt.save();
 
   try {
-    const parsed = await processReceiptWithAI(req.file.originalname, req.file.mimetype, req.file.buffer);
+    const parsed = await processReceiptWithAI(params.fileName, params.mimeType, params.buffer);
 
     receipt.status = "completed";
     receipt.extractedText = parsed.extractedText;
@@ -62,7 +49,7 @@ receiptRouter.post("/upload", requireAuth, upload.single("receipt"), asyncHandle
 
     if (typeof parsed.amount === "number") {
       await Expense.create({
-        userId: new mongoose.Types.ObjectId(req.userId),
+        userId: new mongoose.Types.ObjectId(params.userId),
         amount: parsed.amount,
         currency: "PHP",
         category: parsed.category || "Uncategorized",
@@ -73,20 +60,57 @@ receiptRouter.post("/upload", requireAuth, upload.single("receipt"), asyncHandle
         rawText: parsed.extractedText
       });
     }
-
-    const payload = receiptUploadResponseSchema.parse({
-      receiptId: receipt.id,
-      status: receipt.status,
-      parsed: receipt.parsedExpense,
-      parsedMeta: receipt.parsedMeta
-    });
-    return res.status(202).json(payload);
   } catch (error) {
     receipt.status = "failed";
     receipt.error = error instanceof Error ? error.message : "OCR processing failed";
     await receipt.save();
-    return res.status(500).json({ message: receipt.error, receiptId: receipt.id });
   }
+}
+
+receiptRouter.post("/upload", requireAuth, upload.single("receipt"), asyncHandler(async (req, res) => {
+  if (!req.file || !req.userId) {
+    return res.status(400).json({ message: "Missing receipt file" });
+  }
+
+  const userId = req.userId;
+  const file = req.file;
+
+  const receipt = await Receipt.create({
+    userId,
+    fileName: file.originalname,
+    mimeType: file.mimetype,
+    status: "uploaded"
+  });
+
+  const ocrAllowed = await canUseOcr(userId);
+  if (!ocrAllowed) {
+    const payload = receiptUploadDisabledResponseSchema.parse({
+      receiptId: receipt.id,
+      status: "uploaded",
+      message: "OCR is disabled for this user"
+    });
+    return res.status(202).json(payload);
+  }
+
+  receipt.status = "processing";
+  await receipt.save();
+
+  // Return immediately so mobile clients can poll status instead of waiting on OCR/LLM latency.
+  setImmediate(() => {
+    void processReceiptInBackground({
+      receiptId: receipt.id,
+      userId,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      buffer: file.buffer
+    });
+  });
+
+  const payload = receiptUploadResponseSchema.parse({
+    receiptId: receipt.id,
+    status: "processing"
+  });
+  return res.status(202).json(payload);
 }));
 
 receiptRouter.get("/:id/status", requireAuth, asyncHandler(async (req, res) => {
