@@ -19,7 +19,7 @@ const expenseSchema = new Schema<IExpense>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     amount: { type: Number, required: true },
-    currency: { type: String, default: "USD" },
+    currency: { type: String, default: "PHP" },
     category: { type: String, required: true },
     merchant: { type: String },
     note: { type: String },

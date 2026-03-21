@@ -9,7 +9,7 @@ export const expenseRouter = Router();
 
 const createExpenseSchema = z.object({
   amount: z.number().positive(),
-  currency: z.string().default("USD"),
+  currency: z.string().default("PHP"),
   category: z.string().min(1),
   merchant: z.string().optional(),
   note: z.string().optional(),

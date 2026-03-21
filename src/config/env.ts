@@ -4,9 +4,11 @@ import { z } from "zod";
 dotenv.config();
 
 const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   MONGODB_URI: z.string().min(1),
   PORT: z.coerce.number().default(8080),
   JWT_SECRET: z.string().min(16).default("change-me-in-env-please"),
+  CORS_ORIGIN: z.string().optional(),
   PARSER_MODE: z.enum(["rules", "llm", "hybrid"]).default("rules"),
   LLM_BASE_URL: z.string().optional(),
   LLM_API_KEY: z.string().optional(),

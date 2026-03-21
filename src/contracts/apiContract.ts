@@ -84,7 +84,7 @@ export function serializeExpense(expense: ExpenseLike) {
   return expenseResponseSchema.parse({
     id: expenseId,
     amount: expense.amount,
-    currency: expense.currency || "USD",
+    currency: expense.currency || "PHP",
     category: expense.category,
     merchant: expense.merchant,
     note: expense.note,

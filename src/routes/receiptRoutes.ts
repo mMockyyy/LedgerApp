@@ -64,7 +64,7 @@ receiptRouter.post("/upload", requireAuth, upload.single("receipt"), asyncHandle
       await Expense.create({
         userId: new mongoose.Types.ObjectId(req.userId),
         amount: parsed.amount,
-        currency: "USD",
+        currency: "PHP",
         category: parsed.category || "Uncategorized",
         merchant: parsed.merchant,
         incurredAt: parsed.incurredAt ? new Date(parsed.incurredAt) : new Date(),

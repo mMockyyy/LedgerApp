@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { ZodError } from "zod";
+import { env } from "./config/env";
 import { authRouter } from "./routes/authRoutes";
 import { budgetRouter } from "./routes/budgetRoutes";
 import { expenseRouter } from "./routes/expenseRoutes";
@@ -10,7 +11,13 @@ import { receiptRouter } from "./routes/receiptRoutes";
 
 export const app = express();
 
-app.use(cors());
+const corsOptions: cors.CorsOptions = env.CORS_ORIGIN
+  ? {
+      origin: env.CORS_ORIGIN.split(",").map((origin) => origin.trim())
+    }
+  : { origin: true };
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "2mb" }));
 
 app.use(healthRouter);
