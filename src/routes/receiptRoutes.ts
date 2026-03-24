@@ -120,7 +120,7 @@ receiptRouter.get("/:id/status", requireAuth, asyncHandler(async (req, res) => {
   }
 
   const payload = receiptStatusResponseSchema.parse({
-    receiptId: receipt._id,
+    receiptId: String(receipt._id),
     status: receipt.status,
     parsedExpense: receipt.parsedExpense,
     parsedMeta: receipt.parsedMeta,
