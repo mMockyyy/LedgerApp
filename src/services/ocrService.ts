@@ -3,6 +3,10 @@ import { z } from "zod";
 import { env } from "../config/env";
 import { CATEGORIES, getCategoryForSubcategory } from "../constants/categories";
 
+function resolveAppReferer(): string {
+  return env.APP_URL || env.RENDER_EXTERNAL_URL || "http://localhost:3000";
+}
+
 export interface ParsedReceipt {
   extractedText: string;
   amount?: number;
@@ -406,7 +410,7 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
       };
 
       if (llmBaseUrl.includes("openrouter.ai")) {
-        headers["HTTP-Referer"] = "http://localhost";
+        headers["HTTP-Referer"] = resolveAppReferer();
         headers["X-Title"] = "LedgerApp Backend";
       }
 
@@ -643,7 +647,7 @@ export async function generateBudgetPlanWithAI(
       };
 
       if (llmBaseUrl.includes("openrouter.ai")) {
-        headers["HTTP-Referer"] = "http://localhost";
+        headers["HTTP-Referer"] = resolveAppReferer();
         headers["X-Title"] = "LedgerApp Backend";
       }
 

@@ -16,11 +16,19 @@ const userSchema = new Schema<IUser>(
     passwordHash: { type: String, default: null },
     isEmailVerified: { type: Boolean, default: false },
     provider: { type: String, enum: ["email", "google"], default: "email" },
-    googleId: { type: String, unique: true, sparse: true, default: null },
+    googleId: { type: String, trim: true },
     emailVerificationToken: { type: String, default: null },
     emailVerificationTokenExpires: { type: Date, default: null }
   },
   { timestamps: true }
+);
+
+userSchema.index(
+  { googleId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { googleId: { $type: "string" } }
+  }
 );
 
 export const User = model<IUser>("User", userSchema);

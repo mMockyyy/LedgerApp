@@ -1,6 +1,22 @@
 import nodemailer from "nodemailer";
 import { env } from "../config/env";
 
+function resolvePublicBaseUrl(): string {
+  if (env.APP_URL) {
+    return env.APP_URL;
+  }
+
+  if (env.RENDER_EXTERNAL_URL) {
+    return env.RENDER_EXTERNAL_URL;
+  }
+
+  if (env.NODE_ENV !== "production") {
+    return "http://localhost:3000";
+  }
+
+  throw new Error("Missing APP_URL or RENDER_EXTERNAL_URL in production environment");
+}
+
 // Configure your email provider here
 // For development, you can use a service like Mailtrap or Gmail
 const transporter = nodemailer.createTransport({
@@ -22,7 +38,8 @@ export async function sendVerificationEmail(
   email: string,
   token: string
 ): Promise<void> {
-  const verificationUrl = `${env.APP_URL}/auth/verify-email?token=${token}`;
+  const baseUrl = resolvePublicBaseUrl();
+  const verificationUrl = `${baseUrl}/auth/verify-email?token=${token}`;
 
   const mailOptions = {
     from: env.EMAIL_FROM,
@@ -74,7 +91,8 @@ export async function sendPasswordResetEmail(
   email: string,
   token: string
 ): Promise<void> {
-  const resetUrl = `${env.APP_URL}/auth/reset-password?token=${token}`;
+  const baseUrl = resolvePublicBaseUrl();
+  const resetUrl = `${baseUrl}/auth/reset-password?token=${token}`;
 
   const mailOptions = {
     from: env.EMAIL_FROM,
