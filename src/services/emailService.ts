@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { lookup } from "node:dns/promises";
 import { env } from "../config/env";
 
 type MailError = Error & {
@@ -24,17 +25,45 @@ function resolvePublicBaseUrl(): string {
   throw new Error("Missing APP_URL or RENDER_EXTERNAL_URL in production environment");
 }
 
-// Configure your email provider here
-// For development, you can use a service like Mailtrap or Gmail
-const transporter = nodemailer.createTransport({
-  host: env.EMAIL_HOST,
-  port: env.EMAIL_PORT,
-  secure: env.EMAIL_SECURE || false,
-  auth: {
-    user: env.EMAIL_USER,
-    pass: env.EMAIL_PASSWORD,
-  },
-});
+async function createTransporter() {
+  const smtpHost = env.EMAIL_HOST;
+  const smtpPort = env.EMAIL_PORT;
+  const isSecure = env.EMAIL_SECURE || false;
+
+  // Render commonly has no outbound IPv6 route. Resolve SMTP host to IPv4 first.
+  try {
+    const resolved = await lookup(smtpHost, { family: 4 });
+    return nodemailer.createTransport({
+      host: resolved.address,
+      port: smtpPort,
+      secure: isSecure,
+      auth: {
+        user: env.EMAIL_USER,
+        pass: env.EMAIL_PASSWORD,
+      },
+      tls: {
+        servername: smtpHost
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000
+    });
+  } catch {
+    // Fallback to hostname resolution if IPv4 lookup fails.
+    return nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: isSecure,
+      auth: {
+        user: env.EMAIL_USER,
+        pass: env.EMAIL_PASSWORD,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000
+    });
+  }
+}
 
 /**
  * Send verification email to user with a token link
@@ -81,6 +110,7 @@ export async function sendVerificationEmail(
   };
 
   try {
+    const transporter = await createTransporter();
     const info = await transporter.sendMail(mailOptions);
     console.log("Verification email sent:", info.messageId);
   } catch (error) {
@@ -141,6 +171,7 @@ export async function sendPasswordResetEmail(
   };
 
   try {
+    const transporter = await createTransporter();
     const info = await transporter.sendMail(mailOptions);
     console.log("Password reset email sent:", info.messageId);
   } catch (error) {
