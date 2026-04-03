@@ -247,7 +247,8 @@ authRouter.post("/google/mobile", asyncHandler(async (req, res) => {
   let googleIdentity;
   try {
     googleIdentity = await verifyGoogleIdToken(body.idToken);
-  } catch {
+  } catch (err) {
+    console.error("[google/mobile] Firebase token verification failed:", err);
     return res.status(401).json({ message: "Invalid or expired Firebase ID token." });
   }
 
