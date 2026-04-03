@@ -3,6 +3,7 @@ import { z } from "zod";
 import { expenseListResponseSchema, serializeExpense } from "../contracts/apiContract";
 import { requireAuth } from "../middleware/auth";
 import { Expense } from "../models/Expense";
+import { MAIN_CATEGORIES, ALL_SUBCATEGORIES } from "../constants/categories";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export const expenseRouter = Router();
@@ -10,7 +11,12 @@ export const expenseRouter = Router();
 const createExpenseSchema = z.object({
   amount: z.number().positive(),
   currency: z.string().default("PHP"),
-  category: z.string().min(1),
+  category: z.string().refine((val) => MAIN_CATEGORIES.includes(val as any), {
+    message: "Invalid category"
+  }),
+  subcategory: z.string().refine((val) => ALL_SUBCATEGORIES.includes(val as any), {
+    message: "Invalid subcategory"
+  }),
   merchant: z.string().optional(),
   note: z.string().optional(),
   incurredAt: z.string().datetime()

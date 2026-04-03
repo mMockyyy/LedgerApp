@@ -1,12 +1,14 @@
 import Tesseract from "tesseract.js";
 import { z } from "zod";
 import { env } from "../config/env";
+import { CATEGORIES, getCategoryForSubcategory } from "../constants/categories";
 
 export interface ParsedReceipt {
   extractedText: string;
   amount?: number;
   merchant?: string;
   category?: string;
+  subcategory?: string;
   incurredAt?: string;
   parserSource?: "rules" | "llm" | "hybrid-llm" | "hybrid-rules" | "llm-fallback-rules";
   parserConfidence?: number;
@@ -27,36 +29,99 @@ const llmReceiptSchema = z.object({
   amount: z.union([z.number(), z.string()]).optional(),
   merchant: z.string().min(1).max(120).optional(),
   category: z.string().min(1).max(60).optional(),
+  subcategory: z.string().min(1).max(60).optional(),
   incurredAt: z.string().optional(),
   confidence: z.union([z.number(), z.string()]).optional()
 });
 
-function normalizeCategory(value?: string) {
+function normalizeCategory(value?: string): { category?: string; subcategory?: string } {
   if (!value) {
-    return undefined;
+    return {};
   }
 
   const normalized = value.toLowerCase().trim();
-  if (/(food|restaurant|dining|coffee|cafe)/.test(normalized)) {
-    return "Food";
+  
+  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|cafe|chop|food stall|foodcourt)/.test(normalized)) {
+    // Return Food & Drinks category with subcategory
+    if (/(restaurant|chop|foodcourt|diner|eatery)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Restaurants" };
+    }
+    if (/(coffee|cafe|drink|beverage|smoothie|juice|soda)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Drinks" };
+    }
+    if (/(fast food|fastfood|mcdonald|burger|kfc|jollibee|pizza)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Fast Food" };
+    }
+    if (/(grocery|groceries|market|supermarket|s&r|puregold|savemall)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Groceries" };
+    }
+    return { category: "Food & Drinks", subcategory: "Other Food & Drinks" };
   }
-  if (/(transport|travel|transit|fare|ticket|bus|train|taxi|ride)/.test(normalized)) {
-    return "Transport";
+  
+  if (/(transport|travel|transit|fare|ticket|bus|train|taxi|ride|uber|grab|jeep|tricycle)/.test(normalized)) {
+    if (/(public transit|bus|train|mrt|lrt|brt|jeep)/.test(normalized)) {
+      return { category: "Transport", subcategory: "Public Transit" };
+    }
+    if (/(uber|grab|ride|rideshare)/.test(normalized)) {
+      return { category: "Transport", subcategory: "Ride-Sharing" };
+    }
+    if (/taxi/.test(normalized)) {
+      return { category: "Transport", subcategory: "Taxi" };
+    }
+    if (/(gas|fuel|petrol)/.test(normalized)) {
+      return { category: "Transport", subcategory: "Gas/Fuel" };
+    }
+    if (/parking/.test(normalized)) {
+      return { category: "Transport", subcategory: "Parking" };
+    }
+    return { category: "Transport", subcategory: "Other" };
   }
-  if (/(grocery|groceries|market|supermarket)/.test(normalized)) {
-    return "Groceries";
+  
+  if (/(health|medical|pharmacy|clinic|hospital|doctor|dental|gym|fitness|medicine)/.test(normalized)) {
+    if (/(pharmacy|drugstore|medicine)/.test(normalized)) {
+      return { category: "Health", subcategory: "Pharmacy" };
+    }
+    if (/(gym|fitness|workout|sports)/.test(normalized)) {
+      return { category: "Health", subcategory: "Gym/Fitness" };
+    }
+    if (/(dental|dentist|tooth)/.test(normalized)) {
+      return { category: "Health", subcategory: "Dental" };
+    }
+    return { category: "Health", subcategory: "Pharmacy" };
   }
-  if (/(health|medical|pharmacy|clinic|hospital)/.test(normalized)) {
-    return "Health";
+  
+  if (/(entertainment|movie|cinema|streaming|subscription|netflix|spotify|game|gaming)/.test(normalized)) {
+    if (/(movie|cinema|film)/.test(normalized)) {
+      return { category: "Entertainment", subcategory: "Movies & Streaming" };
+    }
+    if (/(game|gaming|steam)/.test(normalized)) {
+      return { category: "Entertainment", subcategory: "Gaming" };
+    }
+    return { category: "Entertainment", subcategory: "Movies & Streaming" };
   }
-  if (/(entertainment|movie|cinema|streaming|subscription)/.test(normalized)) {
-    return "Entertainment";
+  
+  if (/(shopping|clothing|shoes|cosmetics|beauty|electronics|Mall|store|shop)/.test(normalized)) {
+    if (/(clothing|clothes|dress|shirt|pants)/.test(normalized)) {
+      return { category: "Shopping & Personal", subcategory: "Clothing" };
+    }
+    if (/shoes/.test(normalized)) {
+      return { category: "Shopping & Personal", subcategory: "Shoes" };
+    }
+    if (/(cosmetics|beauty|makeup|skincare)/.test(normalized)) {
+      return { category: "Shopping & Personal", subcategory: "Cosmetics & Beauty" };
+    }
+    if (/(electronics|phone|laptop|computer|gadget)/.test(normalized)) {
+      return { category: "Shopping & Personal", subcategory: "Electronics" };
+    }
+    return { category: "Shopping & Personal", subcategory: "Accessories" };
   }
-  if (/(uncategorized|other|unknown|misc)/.test(normalized)) {
-    return "Uncategorized";
+  
+  if (/(uncategorized|other|unknown|misc|miscellaneous)/.test(normalized)) {
+    return { category: "Other", subcategory: "Uncategorized" };
   }
 
-  return value.slice(0, 60);
+  // Default fallback
+  return { category: "Other", subcategory: "Uncategorized" };
 }
 
 function normalizeIsoDate(value?: string) {
@@ -239,29 +304,8 @@ function extractDate(text: string) {
   return Number.isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
 }
 
-function inferCategory(text: string) {
-  const normalized = text.toLowerCase();
-  const alphaOnly = normalized.replace(/[^a-z]/g, "");
-  if (/(cafe|coffee|restaurant|food|burger|pizza|kitchen|dining)/.test(normalized)) {
-    return "Food";
-  }
-  if (
-    /(uber|lyft|taxi|transit|bus|train|parking|fuel|gas|faretype|fare type|driver|conductor|vehicle|route|ticket|amount due|from|to|terminal|station|avenida|avenue)/.test(normalized) ||
-    /faretype|driver|conductor|vehicle|ticket/.test(alphaOnly)
-  ) {
-    return "Transport";
-  }
-  if (/(grocery|market|mart|supermarket)/.test(normalized)) {
-    return "Groceries";
-  }
-  if (/(pharmacy|clinic|hospital|medic|drugstore)/.test(normalized)) {
-    return "Health";
-  }
-  if (/(netflix|spotify|cinema|movie|subscription)/.test(normalized)) {
-    return "Entertainment";
-  }
-
-  return "Uncategorized";
+function inferCategory(text: string): { category?: string; subcategory?: string } {
+  return normalizeCategory(text);
 }
 
 function scoreRuleConfidence(parsed: Omit<ParsedReceipt, "extractedText" | "parserSource" | "parserConfidence" | "llmAttempted" | "llmSucceeded">) {
@@ -282,10 +326,13 @@ function scoreRuleConfidence(parsed: Omit<ParsedReceipt, "extractedText" | "pars
 }
 
 function parseWithRules(extractedText: string): ParserResult {
+  const categoryInfo = inferCategory(extractedText);
+  
   const parsed: Omit<ParsedReceipt, "extractedText"> = {
     amount: extractAmount(extractedText),
     merchant: extractMerchant(extractedText),
-    category: inferCategory(extractedText),
+    category: categoryInfo.category,
+    subcategory: categoryInfo.subcategory,
     incurredAt: extractDate(extractedText)
   };
 
@@ -335,11 +382,12 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
 
   const prompt = [
     "You extract structured data from receipt OCR text.",
-    "Return JSON only with these keys: amount, merchant, category, incurredAt, confidence.",
+    "Return JSON only with these keys: amount, merchant, category, subcategory, incurredAt, confidence.",
     "- amount: number",
     "- never use a year/date value (e.g., 2026) as amount",
     "- merchant: string",
-    "- category: one of Food, Transport, Groceries, Health, Entertainment, Uncategorized",
+    "- category: one of 'Food & Drinks', 'Transport', 'Health', 'Entertainment', 'Shopping & Personal', 'Utilities & Home', 'Education', 'Travel & Vacation', 'Subscriptions & Memberships', 'Other'",
+    "- subcategory: specific subcategory under the category",
     "- incurredAt: ISO-8601 datetime",
     "- confidence: number from 0 to 1",
     "If a field is unknown, omit it.",
@@ -410,11 +458,29 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
             ? parseAmountToken(parsed.amount)
             : undefined;
 
+      // Normalize category and subcategory if provided by LLM
+      let category = parsed.category;
+      let subcategory = parsed.subcategory;
+      
+      if (parsed.category) {
+        const categoryInfo = normalizeCategory(parsed.category);
+        category = categoryInfo.category;
+        subcategory = categoryInfo.subcategory;
+      }
+      
+      // If LLM provided subcategory, validate it
+      if (parsed.subcategory && !category) {
+        // Try to infer category from subcategory
+        category = getCategoryForSubcategory(parsed.subcategory);
+        subcategory = parsed.subcategory;
+      }
+
       return {
         extractedText,
         amount: normalizedAmount,
         merchant: parsed.merchant?.trim(),
-        category: normalizeCategory(parsed.category) ?? "Uncategorized",
+        category: category ?? "Other",
+        subcategory: subcategory ?? "Uncategorized",
         incurredAt: normalizeIsoDate(parsed.incurredAt) ?? extractDate(extractedText),
         parserConfidence: normalizeConfidence(parsed.confidence),
         parserSource: "llm",
@@ -445,6 +511,7 @@ function mergeHybrid(ruleResult: ParserResult, llmResult: ParserResult | null): 
       amount: llmResult.amount ?? ruleResult.amount,
       merchant: llmResult.merchant ?? ruleResult.merchant,
       category: llmResult.category ?? ruleResult.category,
+      subcategory: llmResult.subcategory ?? ruleResult.subcategory,
       incurredAt: llmResult.incurredAt ?? ruleResult.incurredAt,
       parserSource: "hybrid-llm",
       parserConfidence: llmResult.parserConfidence,
@@ -458,6 +525,7 @@ function mergeHybrid(ruleResult: ParserResult, llmResult: ParserResult | null): 
     amount: ruleResult.amount ?? llmResult.amount,
     merchant: ruleResult.merchant ?? llmResult.merchant,
     category: ruleResult.category ?? llmResult.category,
+    subcategory: ruleResult.subcategory ?? llmResult.subcategory,
     incurredAt: ruleResult.incurredAt ?? llmResult.incurredAt,
     parserSource: "hybrid-rules",
     parserConfidence: ruleResult.parserConfidence,
@@ -500,4 +568,153 @@ export async function processReceiptWithAI(fileName: string, mimeType: string, b
   }
 
   return mergeHybrid(ruleResult, llmResult);
+}
+
+export interface BudgetPlanAIResult {
+  dailyBudget: number;
+  categoryAllocations: {
+    [key: string]: number;
+  };
+  overspendFlags: string[];
+  warnings: string[];
+}
+
+export async function generateBudgetPlanWithAI(
+  weeklyBudget: number,
+  tone: "Strict" | "Balanced" | "Flexible",
+  expenseData: Array<{ category: string; amount: number }>
+): Promise<BudgetPlanAIResult | null> {
+  const llmKeys = getLlmApiKeys();
+  if (llmKeys.length === 0) {
+    return null;
+  }
+
+  const llmModel = env.LLM_MODEL || env.OPENAI_MODEL;
+
+  // Build category spending summary from past expenses
+  const categoryTotals: { [key: string]: number } = {};
+  const categoryCount: { [key: string]: number } = {};
+
+  for (const expense of expenseData) {
+    const cat = expense.category || "Uncategorized";
+    categoryTotals[cat] = (categoryTotals[cat] || 0) + expense.amount;
+    categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+  }
+
+  const categorySummary = Object.entries(categoryTotals)
+    .map(([cat, total]) => ({
+      category: cat,
+      totalSpent: total,
+      averagePerDay: total / 28 // Assume 4 weeks = 28 days
+    }))
+    .sort((a, b) => b.totalSpent - a.totalSpent);
+
+  const toneInstructions = {
+    Strict: "Reduce high-spending categories by 10-15%. Add daily spending limits. Be assertive about overspend warnings.",
+    Balanced: "Keep historical spending patterns. Allocate proportionally across categories. Warn on extreme outliers.",
+    Flexible: "Allow +10% buffer on high-spending categories. Be lenient with recommendations. Focus on overall budget only."
+  };
+
+  const prompt = [
+    `You are a personal budget planning AI. A user has set a weekly budget of PHP ${weeklyBudget}.`,
+    `Their spending tone preference is: ${tone}`,
+    `Their historical spending (past 4 weeks) by category:`,
+    categorySummary.map((s) => `- ${s.category}: PHP ${s.totalSpent.toFixed(2)} (avg PHP ${s.averagePerDay.toFixed(2)}/day)`).join("\n"),
+    "",
+    `Tone guidance: ${toneInstructions[tone]}`,
+    "",
+    'Generate a JSON budget plan with ONLY these fields:',
+    '- dailyBudget: decimal number (weeklyBudget / 7)',
+    '- categoryAllocations: object with category names as keys and PHP amounts as values',
+    '- overspendFlags: array of category names that user typically overspends on',
+    '- warnings: array of 2-3 strategic recommendations to stay within budget',
+    '',
+    'Return ONLY valid JSON. No markdown, no explanation.'
+  ].join("\n");
+
+  for (const llmKey of llmKeys) {
+    const isOpenRouterKey = llmKey.startsWith("sk-or-");
+    const llmBaseUrl = env.LLM_BASE_URL || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
+
+    try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${llmKey}`,
+        "Content-Type": "application/json"
+      };
+
+      if (llmBaseUrl.includes("openrouter.ai")) {
+        headers["HTTP-Referer"] = "http://localhost";
+        headers["X-Title"] = "LedgerApp Backend";
+      }
+
+      const response = await fetch(`${llmBaseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: llmModel,
+          temperature: 0.7,
+          messages: [
+            {
+              role: "system",
+              content: "You are a strict JSON budget plan generator. Return ONLY valid JSON with no markdown or explanation."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        if (shouldRetryWithNextKey(response.status)) {
+          continue;
+        }
+        return null;
+      }
+
+      const data = await response.json() as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        return null;
+      }
+
+      const jsonCandidate = extractFirstJsonObject(content);
+      if (!jsonCandidate) {
+        return null;
+      }
+
+      const parsed = JSON.parse(jsonCandidate);
+
+      // Validate structure
+      if (
+        typeof parsed.dailyBudget !== "number" ||
+        typeof parsed.categoryAllocations !== "object" ||
+        !Array.isArray(parsed.overspendFlags) ||
+        !Array.isArray(parsed.warnings)
+      ) {
+        return null;
+      }
+
+      return {
+        dailyBudget: Math.round(parsed.dailyBudget * 100) / 100,
+        categoryAllocations: Object.entries(parsed.categoryAllocations).reduce(
+          (acc: { [key: string]: number }, [cat, amount]) => {
+            acc[cat as string] = Math.round((amount as number) * 100) / 100;
+            return acc;
+          },
+          {}
+        ),
+        overspendFlags: Array.isArray(parsed.overspendFlags) ? parsed.overspendFlags : [],
+        warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }

@@ -2,11 +2,26 @@ import { z } from "zod";
 
 export const authRegisterResponseSchema = z.object({
   id: z.string(),
-  email: z.string().email()
+  email: z.string().email(),
+  message: z.string().optional()
 });
 
 export const authLoginResponseSchema = z.object({
   token: z.string().min(1)
+});
+
+export const authVerifyEmailResponseSchema = z.object({
+  message: z.string()
+});
+
+export const googleOAuthCallbackRequestSchema = z.object({
+  code: z.string().min(1)
+});
+
+export const googleOAuthCallbackResponseSchema = z.object({
+  token: z.string().min(1),
+  email: z.string().email(),
+  isNewAccount: z.boolean()
 });
 
 export const expenseResponseSchema = z.object({
@@ -14,6 +29,7 @@ export const expenseResponseSchema = z.object({
   amount: z.number(),
   currency: z.string(),
   category: z.string(),
+  subcategory: z.string(),
   merchant: z.string().optional(),
   note: z.string().optional(),
   incurredAt: z.string().datetime(),
@@ -29,6 +45,7 @@ export const receiptParsedExpenseSchema = z.object({
   amount: z.number().optional(),
   merchant: z.string().optional(),
   category: z.string().optional(),
+  subcategory: z.string().optional(),
   incurredAt: z.string().optional()
 });
 
@@ -66,6 +83,7 @@ type ExpenseLike = {
   amount: number;
   currency?: string;
   category: string;
+  subcategory: string;
   merchant?: string;
   note?: string;
   incurredAt: Date | string;
@@ -86,6 +104,7 @@ export function serializeExpense(expense: ExpenseLike) {
     amount: expense.amount,
     currency: expense.currency || "PHP",
     category: expense.category,
+    subcategory: expense.subcategory,
     merchant: expense.merchant,
     note: expense.note,
     incurredAt: new Date(expense.incurredAt).toISOString(),
@@ -95,3 +114,49 @@ export function serializeExpense(expense: ExpenseLike) {
     updatedAt: updatedAt.toISOString()
   });
 }
+
+// Budget Plan Schemas
+export const budgetPlanResponseSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  weekStart: z.string().datetime(),
+  weekEnd: z.string().datetime(),
+  weeklyBudget: z.number(),
+  tone: z.enum(["Strict", "Balanced", "Flexible"]),
+  dailyBudget: z.number(),
+  categoryAllocations: z.record(z.number()),
+  overspendFlags: z.array(z.string()),
+  warnings: z.array(z.string()),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const categoryProgressSchema = z.object({
+  category: z.string(),
+  spent: z.number(),
+  limit: z.number(),
+  status: z.enum(["on-track", "warning", "over"]),
+  percentUsed: z.number()
+});
+
+export const dailyProgressSchema = z.object({
+  total: z.number(),
+  budget: z.number(),
+  status: z.enum(["on-track", "warning", "over"]),
+  percentUsed: z.number()
+});
+
+export const budgetPlanWithProgressResponseSchema = z.object({
+  plan: budgetPlanResponseSchema,
+  dailyProgress: dailyProgressSchema,
+  categoryProgress: z.array(categoryProgressSchema)
+});
+
+export const dailyProgressAlertResponseSchema = z.object({
+  date: z.string(),
+  dailyBudget: z.number(),
+  spent: z.number(),
+  remaining: z.number(),
+  status: z.enum(["on-track", "warning", "over"]),
+  percentUsed: z.number()
+});

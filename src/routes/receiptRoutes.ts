@@ -37,6 +37,7 @@ async function processReceiptInBackground(params: {
       amount: parsed.amount,
       merchant: parsed.merchant,
       category: parsed.category,
+      subcategory: parsed.subcategory,
       incurredAt: parsed.incurredAt
     };
     receipt.parsedMeta = {
@@ -52,7 +53,8 @@ async function processReceiptInBackground(params: {
         userId: new mongoose.Types.ObjectId(params.userId),
         amount: parsed.amount,
         currency: "PHP",
-        category: parsed.category || "Uncategorized",
+        category: parsed.category || "Other",
+        subcategory: parsed.subcategory || "Uncategorized",
         merchant: parsed.merchant,
         incurredAt: parsed.incurredAt ? new Date(parsed.incurredAt) : new Date(),
         source: "ocr",

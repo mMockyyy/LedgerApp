@@ -12,6 +12,7 @@ export interface IReceipt extends mongoose.Document {
     amount?: number;
     merchant?: string;
     category?: string;
+    subcategory?: string;
     incurredAt?: string;
   };
   parsedMeta?: {
@@ -34,6 +35,7 @@ const receiptSchema = new Schema<IReceipt>(
       amount: { type: Number },
       merchant: { type: String },
       category: { type: String },
+      subcategory: { type: String },
       incurredAt: { type: String }
     },
     parsedMeta: {
