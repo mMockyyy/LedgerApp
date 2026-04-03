@@ -7,7 +7,9 @@ export const authRegisterResponseSchema = z.object({
 });
 
 export const authLoginResponseSchema = z.object({
-  token: z.string().min(1)
+  token: z.string().min(1),
+  userId: z.string().min(1),
+  email: z.string().email()
 });
 
 export const authVerifyEmailResponseSchema = z.object({
@@ -18,8 +20,13 @@ export const googleOAuthCallbackRequestSchema = z.object({
   code: z.string().min(1)
 });
 
+export const googleOAuthMobileRequestSchema = z.object({
+  idToken: z.string().min(1)
+});
+
 export const googleOAuthCallbackResponseSchema = z.object({
   token: z.string().min(1),
+  userId: z.string().min(1),
   email: z.string().email(),
   isNewAccount: z.boolean()
 });

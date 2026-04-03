@@ -9,13 +9,14 @@ import {
   authRegisterResponseSchema,
   authVerifyEmailResponseSchema,
   googleOAuthCallbackRequestSchema,
+  googleOAuthMobileRequestSchema,
   googleOAuthCallbackResponseSchema
 } from "../contracts/apiContract";
 import { env } from "../config/env";
 import { User } from "../models/User";
 import { asyncHandler } from "../utils/asyncHandler";
 import { sendVerificationEmail } from "../services/emailService";
-import { exchangeCodeForGoogleIdentity } from "../services/googleOauthService";
+import { exchangeCodeForGoogleIdentity, verifyGoogleIdToken } from "../services/googleOauthService";
 
 export const authRouter = Router();
 
@@ -31,6 +32,80 @@ function generateVerificationToken(): { token: string; hash: string } {
   const token = crypto.randomBytes(32).toString("hex");
   const hash = crypto.createHash("sha256").update(token).digest("hex");
   return { token, hash };
+}
+
+async function signInOrCreateGoogleUser(googleIdentity: { googleId: string; email: string; emailVerified: boolean }) {
+  const normalizedEmail = googleIdentity.email.toLowerCase();
+
+  if (!googleIdentity.emailVerified) {
+    return { status: 403 as const, body: { message: "Google account email must be verified." } };
+  }
+
+  if (!normalizedEmail.endsWith("@gmail.com")) {
+    return { status: 403 as const, body: { message: "Only Gmail accounts are allowed." } };
+  }
+
+  const existingByGoogleId = await User.findOne({ googleId: googleIdentity.googleId });
+  if (existingByGoogleId) {
+    existingByGoogleId.isEmailVerified = true;
+    existingByGoogleId.provider = "google";
+    existingByGoogleId.googleId = googleIdentity.googleId;
+    await existingByGoogleId.save();
+
+    const token = jwt.sign({ sub: existingByGoogleId.id }, env.JWT_SECRET, { expiresIn: "7d" });
+    return {
+      status: 200 as const,
+      body: googleOAuthCallbackResponseSchema.parse({
+        token,
+        userId: existingByGoogleId.id,
+        email: existingByGoogleId.email,
+        isNewAccount: false
+      })
+    };
+  }
+
+  const existingByEmail = await User.findOne({ email: normalizedEmail });
+  if (existingByEmail) {
+    if (existingByEmail.googleId && existingByEmail.googleId !== googleIdentity.googleId) {
+      return { status: 409 as const, body: { message: "This email is already linked to a different Google account." } };
+    }
+
+    existingByEmail.googleId = googleIdentity.googleId;
+    existingByEmail.isEmailVerified = true;
+    existingByEmail.emailVerificationToken = undefined;
+    existingByEmail.emailVerificationTokenExpires = undefined;
+    await existingByEmail.save();
+
+    const token = jwt.sign({ sub: existingByEmail.id }, env.JWT_SECRET, { expiresIn: "7d" });
+    return {
+      status: 200 as const,
+      body: googleOAuthCallbackResponseSchema.parse({
+        token,
+        userId: existingByEmail.id,
+        email: existingByEmail.email,
+        isNewAccount: false
+      })
+    };
+  }
+
+  const user = await User.create({
+    email: normalizedEmail,
+    passwordHash: null,
+    isEmailVerified: true,
+    provider: "google",
+    googleId: googleIdentity.googleId
+  });
+
+  const token = jwt.sign({ sub: user.id }, env.JWT_SECRET, { expiresIn: "7d" });
+  return {
+    status: 200 as const,
+    body: googleOAuthCallbackResponseSchema.parse({
+      token,
+      userId: user.id,
+      email: user.email,
+      isNewAccount: true
+    })
+  };
 }
 
 authRouter.post("/register", asyncHandler(async (req, res) => {
@@ -102,7 +177,7 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   }
 
   const token = jwt.sign({ sub: user.id }, env.JWT_SECRET, { expiresIn: "7d" });
-  const payload = authLoginResponseSchema.parse({ token });
+  const payload = authLoginResponseSchema.parse({ token, userId: user.id, email: user.email });
   return res.json(payload);
 }));
 
@@ -146,66 +221,13 @@ authRouter.post("/google/callback", asyncHandler(async (req, res) => {
   const body = googleOAuthCallbackRequestSchema.parse(req.body);
 
   const googleIdentity = await exchangeCodeForGoogleIdentity(body.code);
-  const normalizedEmail = googleIdentity.email.toLowerCase();
+  const result = await signInOrCreateGoogleUser(googleIdentity);
+  return res.status(result.status).json(result.body);
+}));
 
-  if (!googleIdentity.emailVerified) {
-    return res.status(403).json({ message: "Google account email must be verified." });
-  }
-
-  if (!normalizedEmail.endsWith("@gmail.com")) {
-    return res.status(403).json({ message: "Only Gmail accounts are allowed." });
-  }
-
-  const existingByGoogleId = await User.findOne({ googleId: googleIdentity.googleId });
-  if (existingByGoogleId) {
-    existingByGoogleId.isEmailVerified = true;
-    existingByGoogleId.provider = "google";
-    existingByGoogleId.googleId = googleIdentity.googleId;
-    await existingByGoogleId.save();
-
-    const token = jwt.sign({ sub: existingByGoogleId.id }, env.JWT_SECRET, { expiresIn: "7d" });
-    const payload = googleOAuthCallbackResponseSchema.parse({
-      token,
-      email: existingByGoogleId.email,
-      isNewAccount: false
-    });
-    return res.json(payload);
-  }
-
-  const existingByEmail = await User.findOne({ email: normalizedEmail });
-  if (existingByEmail) {
-    if (existingByEmail.googleId && existingByEmail.googleId !== googleIdentity.googleId) {
-      return res.status(409).json({ message: "This email is already linked to a different Google account." });
-    }
-
-    existingByEmail.googleId = googleIdentity.googleId;
-    existingByEmail.isEmailVerified = true;
-    existingByEmail.emailVerificationToken = undefined;
-    existingByEmail.emailVerificationTokenExpires = undefined;
-    await existingByEmail.save();
-
-    const token = jwt.sign({ sub: existingByEmail.id }, env.JWT_SECRET, { expiresIn: "7d" });
-    const payload = googleOAuthCallbackResponseSchema.parse({
-      token,
-      email: existingByEmail.email,
-      isNewAccount: false
-    });
-    return res.json(payload);
-  }
-
-  const user = await User.create({
-    email: normalizedEmail,
-    passwordHash: null,
-    isEmailVerified: true,
-    provider: "google",
-    googleId: googleIdentity.googleId
-  });
-
-  const token = jwt.sign({ sub: user.id }, env.JWT_SECRET, { expiresIn: "7d" });
-  const payload = googleOAuthCallbackResponseSchema.parse({
-    token,
-    email: user.email,
-    isNewAccount: true
-  });
-  return res.json(payload);
+authRouter.post("/google/mobile", asyncHandler(async (req, res) => {
+  const body = googleOAuthMobileRequestSchema.parse(req.body);
+  const googleIdentity = await verifyGoogleIdToken(body.idToken);
+  const result = await signInOrCreateGoogleUser(googleIdentity);
+  return res.status(result.status).json(result.body);
 }));

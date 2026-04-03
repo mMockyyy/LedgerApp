@@ -44,3 +44,30 @@ export async function exchangeCodeForGoogleIdentity(code: string): Promise<Googl
     emailVerified: payload.email_verified === true
   };
 }
+
+function getGoogleClientForIdToken() {
+  if (!env.GOOGLE_CLIENT_ID) {
+    throw new Error("Google OAuth is not configured. Set GOOGLE_CLIENT_ID.");
+  }
+
+  return new OAuth2Client(env.GOOGLE_CLIENT_ID);
+}
+
+export async function verifyGoogleIdToken(idToken: string): Promise<GoogleIdentity> {
+  const client = getGoogleClientForIdToken();
+  const ticket = await client.verifyIdToken({
+    idToken,
+    audience: env.GOOGLE_CLIENT_ID
+  });
+
+  const payload = ticket.getPayload();
+  if (!payload?.sub || !payload.email) {
+    throw new Error("Google token payload is missing required fields");
+  }
+
+  return {
+    googleId: payload.sub,
+    email: payload.email,
+    emailVerified: payload.email_verified === true
+  };
+}
