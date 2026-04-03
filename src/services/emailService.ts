@@ -1,6 +1,13 @@
 import nodemailer from "nodemailer";
 import { env } from "../config/env";
 
+type MailError = Error & {
+  code?: string;
+  command?: string;
+  response?: string;
+  responseCode?: number;
+};
+
 function resolvePublicBaseUrl(): string {
   if (env.APP_URL) {
     return env.APP_URL;
@@ -77,7 +84,14 @@ export async function sendVerificationEmail(
     const info = await transporter.sendMail(mailOptions);
     console.log("Verification email sent:", info.messageId);
   } catch (error) {
-    console.error("Failed to send verification email:", error);
+    const mailError = error as MailError;
+    console.error("Failed to send verification email", {
+      code: mailError.code,
+      command: mailError.command,
+      responseCode: mailError.responseCode,
+      response: mailError.response,
+      message: mailError.message
+    });
     throw new Error("Could not send verification email");
   }
 }
@@ -130,7 +144,14 @@ export async function sendPasswordResetEmail(
     const info = await transporter.sendMail(mailOptions);
     console.log("Password reset email sent:", info.messageId);
   } catch (error) {
-    console.error("Failed to send password reset email:", error);
+    const mailError = error as MailError;
+    console.error("Failed to send password reset email", {
+      code: mailError.code,
+      command: mailError.command,
+      responseCode: mailError.responseCode,
+      response: mailError.response,
+      message: mailError.message
+    });
     throw new Error("Could not send password reset email");
   }
 }

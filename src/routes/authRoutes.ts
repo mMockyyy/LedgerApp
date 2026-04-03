@@ -135,12 +135,16 @@ authRouter.post("/register", asyncHandler(async (req, res) => {
     emailVerificationTokenExpires: tokenExpires
   });
 
-  // Send verification email
+  // Send verification email. If it fails, roll back this registration so users
+  // don't get stuck with an unverified account they cannot activate.
   try {
     await sendVerificationEmail(user.email, token);
   } catch (error) {
     console.error("Failed to send verification email:", error);
-    // Don't fail registration if email sending fails, but log it
+    await User.deleteOne({ _id: user._id });
+    return res.status(502).json({
+      message: "Could not send verification email. Please check mail settings and try again."
+    });
   }
 
   const payload = authRegisterResponseSchema.parse({
