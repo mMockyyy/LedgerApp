@@ -110,6 +110,7 @@ async function signInOrCreateGoogleUser(googleIdentity: { googleId: string; emai
 
 authRouter.post("/register", asyncHandler(async (req, res) => {
   const body = authSchema.parse(req.body);
+  const disableEmailVerification = env.DISABLE_EMAIL_VERIFICATION === true;
 
   // Strict email validation
   if (!validate(body.email)) {
@@ -123,28 +124,37 @@ authRouter.post("/register", asyncHandler(async (req, res) => {
 
   const passwordHash = await bcrypt.hash(body.password, 10);
 
-  // Generate verification token
-  const { token, hash } = generateVerificationToken();
-  const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  let token: string | undefined;
+  let tokenHash: string | undefined;
+  let tokenExpires: Date | undefined;
+
+  if (!disableEmailVerification) {
+    const generated = generateVerificationToken();
+    token = generated.token;
+    tokenHash = generated.hash;
+    tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  }
 
   const user = await User.create({
     email: body.email,
     passwordHash,
-    isEmailVerified: false,
-    emailVerificationToken: hash,
+    isEmailVerified: disableEmailVerification,
+    emailVerificationToken: tokenHash,
     emailVerificationTokenExpires: tokenExpires
   });
 
-  // Send verification email. If it fails, roll back this registration so users
-  // don't get stuck with an unverified account they cannot activate.
-  try {
-    await sendVerificationEmail(user.email, token);
-  } catch (error) {
-    console.error("Failed to send verification email:", error);
-    await User.deleteOne({ _id: user._id });
-    return res.status(502).json({
-      message: "Could not send verification email. Please check mail settings and try again."
-    });
+  if (!disableEmailVerification && token) {
+    // Send verification email. If it fails, roll back this registration so users
+    // don't get stuck with an unverified account they cannot activate.
+    try {
+      await sendVerificationEmail(user.email, token);
+    } catch (error) {
+      console.error("Failed to send verification email:", error);
+      await User.deleteOne({ _id: user._id });
+      return res.status(502).json({
+        message: "Could not send verification email. Please check mail settings and try again."
+      });
+    }
   }
 
   const payload = authRegisterResponseSchema.parse({
@@ -153,7 +163,9 @@ authRouter.post("/register", asyncHandler(async (req, res) => {
   });
   return res.status(201).json({
     ...payload,
-    message: "Registration successful. Please check your email to verify your account."
+    message: disableEmailVerification
+      ? "Registration successful. Email verification is temporarily disabled."
+      : "Registration successful. Please check your email to verify your account."
   });
 }));
 
@@ -165,7 +177,7 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   }
 
   // Check if email is verified
-  if (!user.isEmailVerified) {
+  if (!env.DISABLE_EMAIL_VERIFICATION && !user.isEmailVerified) {
     return res.status(403).json({
       message: "Please verify your email before logging in. Check your inbox for the verification link."
     });
@@ -231,7 +243,14 @@ authRouter.post("/google/callback", asyncHandler(async (req, res) => {
 
 authRouter.post("/google/mobile", asyncHandler(async (req, res) => {
   const body = googleOAuthMobileRequestSchema.parse(req.body);
-  const googleIdentity = await verifyGoogleIdToken(body.idToken);
+
+  let googleIdentity;
+  try {
+    googleIdentity = await verifyGoogleIdToken(body.idToken);
+  } catch {
+    return res.status(401).json({ message: "Invalid or expired Firebase ID token." });
+  }
+
   const result = await signInOrCreateGoogleUser(googleIdentity);
   return res.status(result.status).json(result.body);
 }));

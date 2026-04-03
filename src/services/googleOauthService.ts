@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import { env } from "../config/env";
+import { getFirebaseAdmin } from "../config/firebaseAdmin";
 
 type GoogleIdentity = {
   googleId: string;
@@ -45,29 +46,17 @@ export async function exchangeCodeForGoogleIdentity(code: string): Promise<Googl
   };
 }
 
-function getGoogleClientForIdToken() {
-  if (!env.GOOGLE_CLIENT_ID) {
-    throw new Error("Google OAuth is not configured. Set GOOGLE_CLIENT_ID.");
-  }
-
-  return new OAuth2Client(env.GOOGLE_CLIENT_ID);
-}
-
 export async function verifyGoogleIdToken(idToken: string): Promise<GoogleIdentity> {
-  const client = getGoogleClientForIdToken();
-  const ticket = await client.verifyIdToken({
-    idToken,
-    audience: env.GOOGLE_CLIENT_ID
-  });
+  const app = getFirebaseAdmin();
+  const decoded = await app.auth().verifyIdToken(idToken);
 
-  const payload = ticket.getPayload();
-  if (!payload?.sub || !payload.email) {
-    throw new Error("Google token payload is missing required fields");
+  if (!decoded.uid || !decoded.email) {
+    throw new Error("Firebase token payload is missing required fields");
   }
 
   return {
-    googleId: payload.sub,
-    email: payload.email,
-    emailVerified: payload.email_verified === true
+    googleId: decoded.uid,
+    email: decoded.email,
+    emailVerified: decoded.email_verified === true
   };
 }

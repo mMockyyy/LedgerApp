@@ -9,6 +9,14 @@ type MailError = Error & {
   responseCode?: number;
 };
 
+type MailPayload = {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+};
+
 function resolvePublicBaseUrl(): string {
   if (env.APP_URL) {
     return env.APP_URL;
@@ -65,6 +73,42 @@ async function createTransporter() {
   }
 }
 
+async function sendWithResend(mailOptions: MailPayload): Promise<void> {
+  if (!env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM || mailOptions.from,
+      to: [mailOptions.to],
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend API error ${response.status}: ${body}`);
+  }
+}
+
+async function sendMail(mailOptions: MailPayload): Promise<void> {
+  if (env.RESEND_API_KEY) {
+    await sendWithResend(mailOptions);
+    return;
+  }
+
+  const transporter = await createTransporter();
+  await transporter.sendMail(mailOptions);
+}
+
 /**
  * Send verification email to user with a token link
  * @param email - Recipient email address
@@ -77,7 +121,7 @@ export async function sendVerificationEmail(
   const baseUrl = resolvePublicBaseUrl();
   const verificationUrl = `${baseUrl}/auth/verify-email?token=${token}`;
 
-  const mailOptions = {
+  const mailOptions: MailPayload = {
     from: env.EMAIL_FROM,
     to: email,
     subject: "Verify Your Email Address",
@@ -110,9 +154,8 @@ export async function sendVerificationEmail(
   };
 
   try {
-    const transporter = await createTransporter();
-    const info = await transporter.sendMail(mailOptions);
-    console.log("Verification email sent:", info.messageId);
+    await sendMail(mailOptions);
+    console.log("Verification email sent");
   } catch (error) {
     const mailError = error as MailError;
     console.error("Failed to send verification email", {
@@ -138,7 +181,7 @@ export async function sendPasswordResetEmail(
   const baseUrl = resolvePublicBaseUrl();
   const resetUrl = `${baseUrl}/auth/reset-password?token=${token}`;
 
-  const mailOptions = {
+  const mailOptions: MailPayload = {
     from: env.EMAIL_FROM,
     to: email,
     subject: "Reset Your Password",
@@ -171,9 +214,8 @@ export async function sendPasswordResetEmail(
   };
 
   try {
-    const transporter = await createTransporter();
-    const info = await transporter.sendMail(mailOptions);
-    console.log("Password reset email sent:", info.messageId);
+    await sendMail(mailOptions);
+    console.log("Password reset email sent");
   } catch (error) {
     const mailError = error as MailError;
     console.error("Failed to send password reset email", {

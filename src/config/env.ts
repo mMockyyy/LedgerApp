@@ -23,6 +23,12 @@ const envSchema = z.object({
   EMAIL_USER: z.string().min(1).default("test@ethereal.email"),
   EMAIL_PASSWORD: z.string().min(1).default("test_password"),
   EMAIL_FROM: z.string().email().default("noreply@ledgerapp.com"),
+  DISABLE_EMAIL_VERIFICATION: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM: z.string().email().optional(),
   PARSER_MODE: z.enum(["rules", "llm", "hybrid"]).default("rules"),
   LLM_BASE_URL: z.string().optional(),
   LLM_API_KEY: z.string().optional(),
