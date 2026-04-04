@@ -5,7 +5,6 @@ export interface IBudgetPlan extends Document {
   weekStart: Date;
   weekEnd: Date;
   weeklyBudget: number;
-  tone: "Strict" | "Balanced" | "Flexible";
   dailyBudget: number;
   categoryAllocations: {
     [key: string]: number;
@@ -34,11 +33,6 @@ const BudgetPlanSchema = new Schema(
       type: Number,
       required: true,
       min: 0,
-    },
-    tone: {
-      type: String,
-      enum: ["Strict", "Balanced", "Flexible"],
-      required: true,
     },
     dailyBudget: {
       type: Number,

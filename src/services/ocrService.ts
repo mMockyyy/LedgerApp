@@ -896,17 +896,13 @@ export async function processReceiptWithAI(fileName: string, mimeType: string, b
 }
 
 export interface BudgetPlanAIResult {
-  dailyBudget: number;
-  categoryAllocations: {
-    [key: string]: number;
-  };
   overspendFlags: string[];
   warnings: string[];
 }
 
 export async function generateBudgetPlanWithAI(
   weeklyBudget: number,
-  tone: "Strict" | "Balanced" | "Flexible",
+  categoryAllocations: Record<string, number>,
   expenseData: Array<{ category: string; amount: number }>
 ): Promise<BudgetPlanAIResult | null> {
   const llmKeys = getLlmApiKeys();
@@ -918,43 +914,40 @@ export async function generateBudgetPlanWithAI(
 
   // Build category spending summary from past expenses
   const categoryTotals: { [key: string]: number } = {};
-  const categoryCount: { [key: string]: number } = {};
 
   for (const expense of expenseData) {
     const cat = expense.category || "Uncategorized";
     categoryTotals[cat] = (categoryTotals[cat] || 0) + expense.amount;
-    categoryCount[cat] = (categoryCount[cat] || 0) + 1;
   }
 
-  const categorySummary = Object.entries(categoryTotals)
-    .map(([cat, total]) => ({
-      category: cat,
-      totalSpent: total,
-      averagePerDay: total / 28 // Assume 4 weeks = 28 days
-    }))
-    .sort((a, b) => b.totalSpent - a.totalSpent);
+  const historySummary = Object.entries(categoryTotals)
+    .map(([cat, total]) => `- ${cat}: PHP ${total.toFixed(2)} spent (avg PHP ${(total / 28).toFixed(2)}/day)`)
+    .sort()
+    .join("\n");
 
-  const toneInstructions = {
-    Strict: "Reduce high-spending categories by 10-15%. Add daily spending limits. Be assertive about overspend warnings.",
-    Balanced: "Keep historical spending patterns. Allocate proportionally across categories. Warn on extreme outliers.",
-    Flexible: "Allow +10% buffer on high-spending categories. Be lenient with recommendations. Focus on overall budget only."
-  };
+  const allocationSummary = Object.entries(categoryAllocations)
+    .map(([cat, limit]) => {
+      const histSpent = categoryTotals[cat] ?? 0;
+      const weeklyHistAvg = histSpent / 4; // 4 weeks
+      return `- ${cat}: user set PHP ${limit.toFixed(2)}/week (historical avg PHP ${weeklyHistAvg.toFixed(2)}/week)`;
+    })
+    .join("\n");
 
   const prompt = [
-    `You are a personal budget planning AI. A user has set a weekly budget of PHP ${weeklyBudget}.`,
-    `Their spending tone preference is: ${tone}`,
-    `Their historical spending (past 4 weeks) by category:`,
-    categorySummary.map((s) => `- ${s.category}: PHP ${s.totalSpent.toFixed(2)} (avg PHP ${s.averagePerDay.toFixed(2)}/day)`).join("\n"),
-    "",
-    `Tone guidance: ${toneInstructions[tone]}`,
-    "",
-    'Generate a JSON budget plan with ONLY these fields:',
-    '- dailyBudget: decimal number (weeklyBudget / 7)',
-    '- categoryAllocations: object with category names as keys and PHP amounts as values',
-    '- overspendFlags: array of category names that user typically overspends on',
-    '- warnings: array of 2-3 strategic recommendations to stay within budget',
-    '',
-    'Return ONLY valid JSON. No markdown, no explanation.'
+    `You are a personal budget advisor. A user has set a weekly budget of PHP ${weeklyBudget} with their own category limits.`,
+    ``,
+    `User's category allocations vs historical spending:`,
+    allocationSummary,
+    ``,
+    `Full historical spending (past 4 weeks):`,
+    historySummary,
+    ``,
+    `Analyze the user's own allocations against their real spending history and return:`,
+    `- overspendFlags: array of category names where the user historically spends MORE than their set limit`,
+    `- warnings: array of 2-3 concise, actionable recommendations (flag tight allocations, highlight risky categories, suggest adjustments)`,
+    ``,
+    `Return ONLY valid JSON with exactly these two fields. No markdown, no explanation.`,
+    `{ "overspendFlags": [...], "warnings": [...] }`
   ].join("\n");
 
   for (const llmKey of llmKeys) {
@@ -1016,8 +1009,6 @@ export async function generateBudgetPlanWithAI(
 
       // Validate structure
       if (
-        typeof parsed.dailyBudget !== "number" ||
-        typeof parsed.categoryAllocations !== "object" ||
         !Array.isArray(parsed.overspendFlags) ||
         !Array.isArray(parsed.warnings)
       ) {
@@ -1025,16 +1016,8 @@ export async function generateBudgetPlanWithAI(
       }
 
       return {
-        dailyBudget: Math.round(parsed.dailyBudget * 100) / 100,
-        categoryAllocations: Object.entries(parsed.categoryAllocations).reduce(
-          (acc: { [key: string]: number }, [cat, amount]) => {
-            acc[cat as string] = Math.round((amount as number) * 100) / 100;
-            return acc;
-          },
-          {}
-        ),
-        overspendFlags: Array.isArray(parsed.overspendFlags) ? parsed.overspendFlags : [],
-        warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
+        overspendFlags: parsed.overspendFlags,
+        warnings: parsed.warnings
       };
     } catch {
       continue;

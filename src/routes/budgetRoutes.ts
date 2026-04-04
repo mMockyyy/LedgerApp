@@ -17,7 +17,7 @@ const budgetSchema = z.object({
 
 const generatePlanSchema = z.object({
   weeklyBudget: z.number().positive(),
-  tone: z.enum(["Strict", "Balanced", "Flexible"])
+  categoryAllocations: z.record(z.string(), z.number().positive())
 });
 
 budgetRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
@@ -65,12 +65,14 @@ budgetRouter.post("/generate-plan", requireAuth, asyncHandler(async (req, res) =
     amount: exp.amount
   }));
 
-  // Generate plan with AI
-  const aiPlan = await generateBudgetPlanWithAI(body.weeklyBudget, body.tone, expenseData);
+  // Generate AI warnings/flags based on user's own allocations vs history
+  const aiPlan = await generateBudgetPlanWithAI(body.weeklyBudget, body.categoryAllocations, expenseData);
 
   if (!aiPlan) {
     return res.status(500).json({ error: "Failed to generate budget plan. Please try again." });
   }
+
+  const dailyBudget = Math.round((body.weeklyBudget / 7) * 100) / 100;
 
   // Save or update plan in database
   const plan = await BudgetPlan.findOneAndUpdate(
@@ -81,9 +83,8 @@ budgetRouter.post("/generate-plan", requireAuth, asyncHandler(async (req, res) =
         weekStart,
         weekEnd,
         weeklyBudget: body.weeklyBudget,
-        tone: body.tone,
-        dailyBudget: aiPlan.dailyBudget,
-        categoryAllocations: aiPlan.categoryAllocations,
+        dailyBudget,
+        categoryAllocations: body.categoryAllocations,
         overspendFlags: aiPlan.overspendFlags,
         warnings: aiPlan.warnings
       }
