@@ -274,14 +274,76 @@ function extractAmount(text: string) {
   return integerValues.length > 0 ? Math.max(...integerValues) : undefined;
 }
 
+// OCR-tolerant patterns for well-known Philippine stores.
+// Handles common Tesseract misreads: M↔N, W↔U, 0↔O, 1↔I/L, 5↔S, 8↔B.
+const KNOWN_PH_STORES: Array<{ pattern: RegExp; name: string }> = [
+  { pattern: /sav[e3][mn][o0]re/i, name: "Savemore" },
+  { pattern: /pur[e3]g[o0]ld/i, name: "Puregold" },
+  { pattern: /rob[i1]n[s5][o0]n[s5]?/i, name: "Robinson's" },
+  { pattern: /m[e3]rcury[\s-]?drug/i, name: "Mercury Drug" },
+  { pattern: /\bsm\b.*(mall|market|super|hyper)/i, name: "SM" },
+  { pattern: /land\s*mark/i, name: "Landmark" },
+  { pattern: /7[\s-]?[e3]l[e3]v[e3]n/i, name: "7-Eleven" },
+  { pattern: /joll[i1]b[e3]{1,2}/i, name: "Jollibee" },
+  { pattern: /mcd[o0]nald[s']?/i, name: "McDonald's" },
+  { pattern: /[s5]tarbucks/i, name: "Starbucks" },
+  { pattern: /[s5]hacky[s']?/i, name: "Shacky's" },
+  { pattern: /[\s]?[k][f][c][\s]?/i, name: "KFC" },
+  { pattern: /[s5]avemall/i, name: "Savemall" },
+  { pattern: /waltermart/i, name: "Waltermart" },
+  { pattern: /[s5]&r[\s]?(cost[s]?[\s]?club)?/i, name: "S&R" },
+  { pattern: /hyp[e3]rm[a4]rt/i, name: "Hypermart" },
+  { pattern: /[s5]u[p]?er[s5]?[\s]?[s5]?t[o0]re/i, name: "Super Store" },
+  { pattern: /[a4]lf[a4]mart/i, name: "Alfamart" },
+  { pattern: /alf[a4][\s]?m[a4]rt/i, name: "Alfamart" },
+  { pattern: /mini[\s]?[s5]t[o0]p/i, name: "MiniStop" },
+  { pattern: /[a4]ll[\s]?d[a4]y/i, name: "AllDay" },
+  { pattern: /ch[o0]wk[i1]ng/i, name: "Chowking" },
+  { pattern: /mang[\s]?[i1]n[a4][s5]al/i, name: "Mang Inasal" },
+  { pattern: /gre[e3]nb[e3]lts?/i, name: "Greenbelt" },
+  { pattern: /gl[o0]r[i1][e3]tt[a4]/i, name: "Glorietta" },
+  { pattern: /[a4]y[a4]l[a4]/i, name: "Ayala" },
+];
+
+// Fix common OCR digit-to-letter errors in uppercase words (merchant names are usually ALL CAPS).
+// Only corrects words that are predominantly letters (avoids corrupting actual numbers).
+function correctOcrCharsInWord(word: string): string {
+  const letterCount = (word.match(/[A-Z]/g) ?? []).length;
+  if (letterCount < word.length * 0.4) {
+    return word; // likely a real number — leave it alone
+  }
+  return word.replace(/0/g, "O").replace(/1/g, "I").replace(/5/g, "S").replace(/8/g, "B");
+}
+
+function applyOcrCorrections(name: string): string {
+  return name.replace(/\b[A-Z0-9]+\b/g, correctOcrCharsInWord);
+}
+
+function matchKnownStore(name: string): string | undefined {
+  for (const { pattern, name: canonical } of KNOWN_PH_STORES) {
+    if (pattern.test(name)) {
+      return canonical;
+    }
+  }
+  return undefined;
+}
+
 function extractMerchant(text: string) {
   const lines = text
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
 
-  // Prefer the first few lines and clean OCR noise characters.
+  // Check the top lines for a known store match first (OCR-tolerant).
   const topLines = lines.slice(0, 6);
+  for (const line of topLines) {
+    const knownStore = matchKnownStore(line);
+    if (knownStore) {
+      return knownStore;
+    }
+  }
+
+  // Fall back to the first non-noise line and apply OCR digit corrections.
   for (const line of topLines) {
     const cleaned = line.replace(/[^A-Za-z0-9 &.-]/g, "").trim();
     if (!cleaned) {
@@ -293,7 +355,10 @@ function extractMerchant(text: string) {
     }
 
     if (/[A-Za-z]{2,}/.test(cleaned) && cleaned.length <= 50) {
-      return cleaned.slice(0, 80);
+      // Apply OCR corrections before returning
+      const corrected = applyOcrCorrections(cleaned);
+      // Check again if the corrected form matches a known store
+      return matchKnownStore(corrected) ?? corrected.slice(0, 80);
     }
   }
 
@@ -545,7 +610,22 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     "  3. Skip if line contains: 'receipt', 'invoice', 'total', 'date', 'time', 'tax'",
     "  4. Pick FIRST valid business name line (usually 1-3 characters for first word)",
     "  5. Max 120 characters",
-    "  6. Examples:",
+    "  6. ⚠️ CORRECT OCR ERRORS IN MERCHANT NAME:",
+    "     Tesseract OCR commonly misreads characters. Apply these corrections:",
+    "     • '0' (digit zero) → 'O' (letter)  e.g. 'T0WN' → 'TOWN'",
+    "     • '1' (digit one)  → 'I' or 'L'   e.g. '1NVOICE' → skip this line",
+    "     • '5' → 'S',  '8' → 'B',  'U' → 'W' (in ALL-CAPS store names)",
+    "     • Adjacent letter confusion: N↔M, U↔W, I↔T, I↔R, VV↔W",
+    "     • If the name resembles a known Philippine store, use correct spelling:",
+    "       SAVENORE / SAVEMORE / SAV3MORE → 'Savemore'",
+    "       PUREGOILD / PUREGO1D → 'Puregold'",
+    "       ROBINSONS / ROB1NSONS → 'Robinson's'",
+    "       SM MALL / SM MARKET → 'SM'",
+    "       MERCURY DRUG / M3RCURY DRUG → 'Mercury Drug'",
+    "       JOLLIBEE / JOLL1B3E → 'Jollibee'",
+    "       MCDONALD / MCD0NALDS → 'McDonald's'",
+    "       STARBUCKS / 5TARBUCKS → 'Starbucks'",
+    "  7. Examples:",
     "     ✅ 'NEW SPREWELL ENTERPRISES'",
     "     ✅ 'ROBINSONS MALLS'",
     "     ❌ 'RECEIPT NO. 001234' (skip this)",
