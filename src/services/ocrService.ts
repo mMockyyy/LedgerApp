@@ -1,7 +1,7 @@
 import Tesseract from "tesseract.js";
 import { z } from "zod";
 import { env } from "../config/env";
-import { CATEGORIES, getCategoryForSubcategory } from "../constants/categories";
+import { getCategoryForSubcategory } from "../constants/categories";
 
 function resolveAppReferer(): string {
   return env.APP_URL || env.RENDER_EXTERNAL_URL || "http://localhost:3000";
@@ -104,12 +104,9 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
     return { category: "Entertainment", subcategory: "Movies & Streaming" };
   }
   
-  if (/(shopping|clothing|shoes|cosmetics|beauty|electronics|Mall|store|shop)/.test(normalized)) {
-    if (/(clothing|clothes|dress|shirt|pants)/.test(normalized)) {
+  if (/(shopping|clothing|shoes|slippers|sandals|sneakers|footwear|cosmetics|beauty|electronics|Mall|store|shop)/.test(normalized)) {
+    if (/(clothing|clothes|dress|shirt|pants|jacket|blouse|shorts|skirt|uniform|slippers|sandals|sneakers|footwear|shoes|boots|heels|flats)/.test(normalized)) {
       return { category: "Shopping & Personal", subcategory: "Clothing" };
-    }
-    if (/shoes/.test(normalized)) {
-      return { category: "Shopping & Personal", subcategory: "Shoes" };
     }
     if (/(cosmetics|beauty|makeup|skincare)/.test(normalized)) {
       return { category: "Shopping & Personal", subcategory: "Cosmetics & Beauty" };
@@ -164,7 +161,9 @@ function normalizeText(rawText: string) {
   return rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
 }
 
-const amountHintRegex = /(amount\s*due|amount|total|fare|balance\s*due|grand\s*total|subtotal|net\s*total)/i;
+const amountHintRegex = /(amount\s*due|amount|total|fare|balance\s*due|grand\s*total|subtotal|subtl|net\s*total)/i;
+// Lines that represent cash tendered or change given — never the actual amount due
+const cashChangeRegex = /\b(cash|change|tendered|paid|payment)\b/i;
 const dateHintRegex = /(date|issued|time|day|month|year)/i;
 
 function isLikelyYear(value: number) {
@@ -189,7 +188,9 @@ function extractAmount(text: string) {
   const lines = text
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    // Exclude cash-tendered and change lines — they are never the amount due
+    .filter((line) => !cashChangeRegex.test(line));
 
   const parseCandidates = (line: string, includePlainIntegers: boolean) => {
     const tokens: string[] = [];
@@ -226,8 +227,9 @@ function extractAmount(text: string) {
     }
   }
 
-  // Second chance: any currency-prefixed amount in the text.
-  const currencyValues = Array.from(text.matchAll(/[₱P\$€£]\s*\d+(?:[\.,]\d{2})?/gi))
+  // Second chance: any currency-prefixed amount in the text (excluding cash/change lines).
+  const currencyValues = lines
+    .flatMap((line) => Array.from(line.matchAll(/[₱P\$€£]\s*\d+(?:[\.,]\d{2})?/gi)))
     .map((match) => parseAmountToken(match[0]))
     .filter((value): value is number => value !== undefined)
     .filter((value) => !isLikelyYear(value));
@@ -298,18 +300,28 @@ function extractMerchant(text: string) {
   return undefined;
 }
 
-function extractDate(text: string) {
+function extractDate(text: string): string | undefined {
   const dateMatch = text.match(/(\d{4}-\d{2}-\d{2}|\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/);
   if (!dateMatch) {
-    return new Date().toISOString();
+    return undefined;
   }
 
   const parsedDate = new Date(dateMatch[1]);
-  return Number.isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
+  return Number.isNaN(parsedDate.getTime()) ? undefined : parsedDate.toISOString();
 }
 
 function inferCategory(text: string): { category?: string; subcategory?: string } {
-  return normalizeCategory(text);
+  // Use top 8 lines + category-hint lines + short lines that look like item names
+  // (item lines are typically short, mostly alpha, and appear before the totals section).
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const topLines = lines.slice(0, 8);
+  const hintLines = lines.filter((l) =>
+    /(total|amount|item|order|receipt|invoice|store|shop|restaurant|cafe|pharmacy|fare|ticket)/i.test(l)
+  );
+  // Short alpha lines are likely product/item names (e.g. "SLIPPERS", "COFFEE LATTE")
+  const itemLines = lines.filter((l) => l.length <= 40 && /^[A-Za-z][A-Za-z0-9 &\-\/]+$/.test(l));
+  const focused = [...new Set([...topLines, ...hintLines.slice(0, 4), ...itemLines.slice(0, 6)])].join(" ");
+  return normalizeCategory(focused);
 }
 
 function scoreRuleConfidence(parsed: Omit<ParsedReceipt, "extractedText" | "parserSource" | "parserConfidence" | "llmAttempted" | "llmSucceeded">) {
@@ -384,19 +396,32 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
   }
   const llmModel = env.LLM_MODEL || env.OPENAI_MODEL;
 
+  // Pre-clean OCR text before sending: collapse excessive blank lines and trim noise
+  const cleanedText = extractedText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(0, 120) // cap at 120 lines to avoid token waste
+    .join("\n");
+
   const prompt = [
-    "You extract structured data from receipt OCR text.",
-    "Return JSON only with these keys: amount, merchant, category, subcategory, incurredAt, confidence.",
-    "- amount: number",
-    "- never use a year/date value (e.g., 2026) as amount",
-    "- merchant: string",
-    "- category: one of 'Food & Drinks', 'Transport', 'Health', 'Entertainment', 'Shopping & Personal', 'Utilities & Home', 'Education', 'Travel & Vacation', 'Subscriptions & Memberships', 'Other'",
-    "- subcategory: specific subcategory under the category",
-    "- incurredAt: ISO-8601 datetime",
-    "- confidence: number from 0 to 1",
-    "If a field is unknown, omit it.",
-    "OCR text:",
-    extractedText.slice(0, 8000)
+    "Extract structured data from this receipt OCR text. The receipts are primarily from the Philippines (currency: Philippine Peso, symbol ₱ or PHP).",
+    "",
+    "Return a single JSON object with these fields:",
+    "- amount: number — the final total/amount due. NEVER use a year (e.g. 2024, 2025, 2026) as an amount. Amounts may use commas as thousand separators (e.g. '1,250.00' = 1250.00).",
+    "- merchant: string — the store/business name, usually in the first 1-3 lines.",
+    "- category: one of exactly: 'Food & Drinks', 'Transport', 'Health', 'Entertainment', 'Shopping & Personal', 'Utilities & Home', 'Education', 'Travel & Vacation', 'Subscriptions & Memberships', 'Other'",
+    "- subcategory: a specific subcategory. Examples: Restaurants, Fast Food, Groceries, Drinks, Ride-Sharing, Public Transit, Taxi, Gas/Fuel, Parking, Pharmacy, Gym/Fitness, Dental, Movies & Streaming, Gaming, Clothing, Shoes, Electronics, Cosmetics & Beauty.",
+    "- incurredAt: ISO-8601 date (e.g. '2025-03-15T00:00:00.000Z'). Look for date/time lines on the receipt.",
+    "- confidence: number 0–1 indicating how certain you are about the extracted data.",
+    "",
+    "Rules:",
+    "- If a field cannot be determined, omit it entirely.",
+    "- For amount: prefer lines labeled 'TOTAL', 'AMOUNT DUE', 'GRAND TOTAL', 'BALANCE DUE' over subtotals.",
+    "- Return ONLY the JSON object, no markdown, no explanation.",
+    "",
+    "OCR TEXT:",
+    cleanedText.slice(0, 6000)
   ].join("\n");
 
   for (const llmKey of llmKeys) {
@@ -462,21 +487,30 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
             ? parseAmountToken(parsed.amount)
             : undefined;
 
-      // Normalize category and subcategory if provided by LLM
+      // Trust the LLM's category/subcategory when it provides exact values.
+      // Only fall back to normalizeCategory() when the LLM's category is unrecognized.
       let category = parsed.category;
       let subcategory = parsed.subcategory;
-      
-      if (parsed.category) {
+
+      const knownCategories = new Set([
+        "Food & Drinks", "Transport", "Health", "Entertainment",
+        "Shopping & Personal", "Utilities & Home", "Education",
+        "Travel & Vacation", "Subscriptions & Memberships", "Other"
+      ]);
+
+      if (parsed.category && !knownCategories.has(parsed.category)) {
+        // LLM returned something non-standard — normalize it
         const categoryInfo = normalizeCategory(parsed.category);
         category = categoryInfo.category;
-        subcategory = categoryInfo.subcategory;
+        // Only override subcategory if LLM didn't supply one
+        if (!parsed.subcategory) {
+          subcategory = categoryInfo.subcategory;
+        }
       }
-      
-      // If LLM provided subcategory, validate it
-      if (parsed.subcategory && !category) {
-        // Try to infer category from subcategory
-        category = getCategoryForSubcategory(parsed.subcategory);
-        subcategory = parsed.subcategory;
+
+      // If LLM gave subcategory but no valid category, infer category from subcategory
+      if (subcategory && !category) {
+        category = getCategoryForSubcategory(subcategory);
       }
 
       return {
@@ -545,8 +579,14 @@ async function extractTextFromBuffer(fileName: string, mimeType: string, buffer:
 
   if (mimeType.startsWith("image/")) {
     const result = await Tesseract.recognize(buffer, "eng", {
-      logger: () => undefined
-    });
+      logger: () => undefined,
+      // PSM 4: assume a single column of text of variable sizes (best for receipts)
+      // OEM 1: LSTM neural net mode for better accuracy
+      tessedit_pageseg_mode: "4",
+      tessedit_ocr_engine_mode: "1",
+      // Preserve more characters found on receipts
+      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/()&@#%₱$€£ \n"
+    } as Parameters<typeof Tesseract.recognize>[2]);
     return normalizeText(result.data.text);
   }
 

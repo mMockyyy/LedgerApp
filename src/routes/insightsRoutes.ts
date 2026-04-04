@@ -4,6 +4,11 @@ import { requireAuth } from "../middleware/auth";
 import { Expense } from "../models/Expense";
 import { BudgetPlan } from "../models/BudgetPlan";
 import { asyncHandler } from "../utils/asyncHandler";
+import {
+  getDashboardInsights,
+  getDetailedInsights,
+  getMonthlyCategoryTrends
+} from "../services/insightsService";
 
 export const insightsRouter = Router();
 
@@ -126,4 +131,30 @@ insightsRouter.get("/monthly", requireAuth, asyncHandler(async (req, res) => {
   }
 
   return res.json(response);
+}));
+
+// AI Insights endpoints
+insightsRouter.get("/dashboard", requireAuth, asyncHandler(async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.userId);
+
+  // Get monthly budget from query or default
+  const monthlyBudget = typeof req.query.budget === "string" ? Number(req.query.budget) : 10000;
+
+  const insights = await getDashboardInsights(userObjectId, monthlyBudget);
+  return res.json(insights);
+}));
+
+insightsRouter.get("/detailed", requireAuth, asyncHandler(async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.userId);
+  const monthlyBudget = typeof req.query.budget === "string" ? Number(req.query.budget) : 10000;
+
+  const insights = await getDetailedInsights(userObjectId, monthlyBudget);
+  return res.json(insights);
+}));
+
+insightsRouter.get("/trends", requireAuth, asyncHandler(async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.userId);
+
+  const trends = await getMonthlyCategoryTrends(userObjectId);
+  return res.json({ trends });
 }));
