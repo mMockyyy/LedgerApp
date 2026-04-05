@@ -169,6 +169,26 @@ budgetRouter.get("/plan", requireAuth, asyncHandler(async (req, res) => {
   });
 }));
 
+// Delete current active budget plan
+budgetRouter.delete("/plan", requireAuth, asyncHandler(async (req, res) => {
+  const today = new Date();
+  const dayOfWeek = today.getDay() || 7;
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - (dayOfWeek - 1));
+  weekStart.setHours(0, 0, 0, 0);
+
+  const result = await BudgetPlan.findOneAndDelete({
+    userId: req.userId,
+    weekStart
+  });
+
+  if (!result) {
+    return res.status(404).json({ error: "No active budget plan found." });
+  }
+
+  return res.status(200).json({ message: "Budget plan deleted." });
+}));
+
 // Get daily progress alert
 budgetRouter.get("/plan/daily-progress", requireAuth, asyncHandler(async (req, res) => {
   const today = new Date();
