@@ -2,6 +2,7 @@ import mongoose, { Schema, model } from "mongoose";
 
 export interface IUser extends mongoose.Document {
   email: string;
+  username?: string;
   passwordHash?: string;
   isEmailVerified: boolean;
   provider: "email" | "google";
@@ -13,6 +14,7 @@ export interface IUser extends mongoose.Document {
 const userSchema = new Schema<IUser>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    username: { type: String, default: null, trim: true, maxlength: 30 },
     passwordHash: { type: String, default: null },
     isEmailVerified: { type: Boolean, default: false },
     provider: { type: String, enum: ["email", "google"], default: "email" },

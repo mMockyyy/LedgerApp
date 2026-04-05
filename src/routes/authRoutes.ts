@@ -4,6 +4,7 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { validate } from "email-validator";
 import { z } from "zod";
+import { requireAuth } from "../middleware/auth";
 import {
   authLoginResponseSchema,
   authRegisterResponseSchema,
@@ -59,6 +60,7 @@ async function signInOrCreateGoogleUser(googleIdentity: { googleId: string; emai
         token,
         userId: existingByGoogleId.id,
         email: existingByGoogleId.email,
+        username: existingByGoogleId.username ?? null,
         isNewAccount: false
       })
     };
@@ -83,6 +85,7 @@ async function signInOrCreateGoogleUser(googleIdentity: { googleId: string; emai
         token,
         userId: existingByEmail.id,
         email: existingByEmail.email,
+        username: existingByEmail.username ?? null,
         isNewAccount: false
       })
     };
@@ -103,6 +106,7 @@ async function signInOrCreateGoogleUser(googleIdentity: { googleId: string; emai
       token,
       userId: user.id,
       email: user.email,
+      username: null,
       isNewAccount: true
     })
   };
@@ -193,7 +197,7 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   }
 
   const token = jwt.sign({ sub: user.id }, env.JWT_SECRET, { expiresIn: "7d" });
-  const payload = authLoginResponseSchema.parse({ token, userId: user.id, email: user.email });
+  const payload = authLoginResponseSchema.parse({ token, userId: user.id, email: user.email, username: user.username ?? null });
   return res.json(payload);
 }));
 
@@ -254,4 +258,21 @@ authRouter.post("/google/mobile", asyncHandler(async (req, res) => {
 
   const result = await signInOrCreateGoogleUser(googleIdentity);
   return res.status(result.status).json(result.body);
+}));
+
+const updateProfileSchema = z.object({
+  username: z.string().min(1).max(30).trim()
+});
+
+authRouter.patch("/profile", requireAuth, asyncHandler(async (req, res) => {
+  const body = updateProfileSchema.parse(req.body);
+  const user = await User.findById(req.userId);
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  user.username = body.username;
+  await user.save();
+
+  return res.json({ username: user.username });
 }));

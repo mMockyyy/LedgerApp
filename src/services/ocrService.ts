@@ -30,6 +30,7 @@ interface ParserResult extends ParsedReceipt {
 }
 
 const llmReceiptSchema = z.object({
+  isReceipt: z.boolean().optional(),
   amount: z.union([z.number(), z.string()]).optional(),
   merchant: z.string().min(1).max(120).optional(),
   category: z.string().min(1).max(60).optional(),
@@ -81,8 +82,8 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
     return { category: "Transport", subcategory: "Other" };
   }
   
-  if (/(health|medical|pharmacy|clinic|hospital|doctor|dental|gym|fitness|medicine)/.test(normalized)) {
-    if (/(pharmacy|drugstore|medicine)/.test(normalized)) {
+  if (/(mercury[\s-]?drug|watsons?|rose[\s-]?pharmacy|southstar[\s-]?drug|generika|health|medical|pharmacy|clinic|hospital|doctor|dental|gym|fitness|medicine|drugstore|biogesic|decolgen|neozep|diatabs|bactidol|kremil|loperamide|ascorbic|paracetamol|antibiotic|vitamin|supplement)/.test(normalized)) {
+    if (/(mercury[\s-]?drug|watsons?|rose[\s-]?pharmacy|southstar[\s-]?drug|generika|pharmacy|drugstore|medicine|biogesic|decolgen|neozep|diatabs|bactidol|kremil|loperamide|ascorbic|paracetamol|antibiotic|vitamin|supplement)/.test(normalized)) {
       return { category: "Health", subcategory: "Pharmacy" };
     }
     if (/(gym|fitness|workout|sports)/.test(normalized)) {
@@ -624,6 +625,11 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     "   KEYWORDS: medicine, paracetamol, antibiotic, cough syrup, vitamin, supplement, drug,",
     "   pharmacy, drugstore, healthcare, clinic, hospital, doctor, dental, dentist, teeth,",
     "   braces, filling, extraction, gym, fitness, workout, training, membership, coach",
+    "   PH drug brands: Biogesic, Decolgen, Neozep, Diatabs, Bactidol, Kremil-S, Loperamide,",
+    "   Ascorbic Acid, Solmux, Lagundi, Tuseran, Medicol, Alaxan, Flanax, Mefenamic Acid,",
+    "   Amoxicillin, Metformin, Losartan, Amlodipine, Omeprazole, Cetirizine, Loratadine",
+    "   ⚠️ MERCHANT OVERRIDE: If merchant is Mercury Drug, Watsons, Rose Pharmacy, Generika,",
+    "   or Southstar Drug → ALWAYS Health > Pharmacy, regardless of item names",
     "",
     "5. ENTERTAINMENT",
     "   Subcategories: Movies & Streaming, Concerts & Events, Gaming, Books & Audio, Sports, Hobbies",
@@ -781,6 +787,12 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     "❌ MISTAKE: Using store names only",
     "✅ CORRECT: ALWAYS prioritize item names/descriptions first",
     "",
+    "❌ MISTAKE: Mercury Drug receipt with brand-name items → Other > Gifts",
+    "✅ CORRECT: Mercury Drug, Watsons, Generika, Rose Pharmacy, Southstar Drug → Health > Pharmacy",
+    "",
+    "❌ MISTAKE: 'Biogesic', 'Decolgen', 'Neozep' items → Other (unrecognized)",
+    "✅ CORRECT: Philippine drug brand names → Health > Pharmacy",
+    "",
     "═══════════════════════════════════════════════════════════════════",
     "JSON OUTPUT FORMAT",
     "═══════════════════════════════════════════════════════════════════",
@@ -799,6 +811,8 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
     "}",
     "",
     "⚠️ RULES:",
+    "  • If the text does NOT appear to be a receipt or invoice (e.g. it is a photo, random text,",
+    "    ID card, document, or completely unrelated content), return ONLY: { \"isReceipt\": false }",
     "  • Omit any field if you cannot determine it",
     "  • confidence should match your certainty (0.35 = unsure, 0.95 = very sure)",
     "  • Always pick a valid category (never invent categories)",
@@ -865,6 +879,11 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
       }
 
       const parsed = llmReceiptSchema.parse(JSON.parse(jsonCandidate));
+
+      if (parsed.isReceipt === false) {
+        throw new Error("NOT_A_RECEIPT");
+      }
+
       const normalizedAmount =
         typeof parsed.amount === "number"
           ? parsed.amount
@@ -910,7 +929,10 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
         llmAttempted: true,
         llmSucceeded: true
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === "NOT_A_RECEIPT") {
+        throw err;
+      }
       continue;
     }
   }
@@ -980,6 +1002,13 @@ async function extractTextFromBuffer(fileName: string, mimeType: string, buffer:
 
 export async function processReceiptWithAI(fileName: string, mimeType: string, buffer: Buffer): Promise<ParsedReceipt> {
   const extractedText = await extractTextFromBuffer(fileName, mimeType, buffer);
+
+  // Reject images with too little text to be a receipt (< 20 alphanumeric chars)
+  const meaningfulChars = (extractedText.match(/[a-zA-Z0-9₱$]/g) ?? []).length;
+  if (meaningfulChars < 20) {
+    throw new Error("NOT_A_RECEIPT");
+  }
+
   const ruleResult = parseWithRules(extractedText);
 
   if (env.PARSER_MODE === "rules") {

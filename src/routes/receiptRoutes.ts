@@ -64,7 +64,11 @@ async function processReceiptInBackground(params: {
     }
   } catch (error) {
     receipt.status = "failed";
-    receipt.error = error instanceof Error ? error.message : "OCR processing failed";
+    if (error instanceof Error && error.message === "NOT_A_RECEIPT") {
+      receipt.error = "The uploaded image does not appear to be a receipt. Please upload a photo of a valid receipt or invoice.";
+    } else {
+      receipt.error = error instanceof Error ? error.message : "OCR processing failed";
+    }
     await receipt.save();
   }
 }
