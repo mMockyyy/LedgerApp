@@ -838,24 +838,36 @@ async function parseWithLlm(extractedText: string): Promise<ParserResult | null>
         headers["X-Title"] = "LedgerApp Backend";
       }
 
-      const response = await fetch(`${llmBaseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model: llmModel,
-          temperature: 0,
-          messages: [
-            {
-              role: "system",
-              content: "You are a strict JSON receipt parser. Return JSON only."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ]
-        })
-      });
+      const llmController = new AbortController();
+      const llmTimeout = setTimeout(() => llmController.abort(), 15_000);
+      let response: Response;
+      try {
+        response = await fetch(`${llmBaseUrl}/chat/completions`, {
+          method: "POST",
+          headers,
+          signal: llmController.signal,
+          body: JSON.stringify({
+            model: llmModel,
+            temperature: 0,
+            max_tokens: 200,
+            messages: [
+              {
+                role: "system",
+                content: "You are a strict JSON receipt parser. Return JSON only."
+              },
+              {
+                role: "user",
+                content: prompt
+              }
+            ]
+          })
+        });
+      } catch {
+        clearTimeout(llmTimeout);
+        continue;
+      } finally {
+        clearTimeout(llmTimeout);
+      }
 
       if (!response.ok) {
         if (shouldRetryWithNextKey(response.status)) {
@@ -985,15 +997,29 @@ async function extractTextFromBuffer(fileName: string, mimeType: string, buffer:
   }
 
   if (mimeType.startsWith("image/")) {
-    const result = await Tesseract.recognize(buffer, "eng", {
-      logger: () => undefined,
-      // PSM 4: assume a single column of text of variable sizes (best for receipts)
-      // OEM 1: LSTM neural net mode for better accuracy
-      tessedit_pageseg_mode: "4",
-      tessedit_ocr_engine_mode: "1",
-      // Preserve more characters found on receipts
-      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/()&@#%₱$€£ \n"
-    } as Parameters<typeof Tesseract.recognize>[2]);
+    const controller = new AbortController();
+    const tesseractTimeout = setTimeout(() => controller.abort(), 60_000);
+    let result: Awaited<ReturnType<typeof Tesseract.recognize>>;
+    try {
+      result = await Promise.race([
+        Tesseract.recognize(buffer, "eng", {
+          logger: () => undefined,
+          // PSM 4: assume a single column of text of variable sizes (best for receipts)
+          // OEM 3: auto-select best available engine (faster than LSTM-only on many images)
+          tessedit_pageseg_mode: "4",
+          tessedit_ocr_engine_mode: "3",
+          // Preserve more characters found on receipts
+          tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/()&@#%₱$€£ \n"
+        } as Parameters<typeof Tesseract.recognize>[2]),
+        new Promise<never>((_, reject) =>
+          controller.signal.addEventListener("abort", () =>
+            reject(new Error("Tesseract OCR timed out after 60s"))
+          )
+        )
+      ]);
+    } finally {
+      clearTimeout(tesseractTimeout);
+    }
     return normalizeText(result.data.text);
   }
 
@@ -1009,22 +1035,24 @@ export async function processReceiptWithAI(fileName: string, mimeType: string, b
     throw new Error("NOT_A_RECEIPT");
   }
 
-  const ruleResult = parseWithRules(extractedText);
-
   if (env.PARSER_MODE === "rules") {
-    return ruleResult;
+    return parseWithRules(extractedText);
   }
 
   const llmResult = await parseWithLlm(extractedText);
   if (env.PARSER_MODE === "llm") {
-    return llmResult ?? {
-      ...ruleResult,
+    if (llmResult) return llmResult;
+    const fallback = parseWithRules(extractedText);
+    return {
+      ...fallback,
       parserSource: "llm-fallback-rules",
       llmAttempted: true,
       llmSucceeded: false
     };
   }
 
+  // hybrid — both results needed for mergeHybrid
+  const ruleResult = parseWithRules(extractedText);
   return mergeHybrid(ruleResult, llmResult);
 }
 
