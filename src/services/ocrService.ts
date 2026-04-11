@@ -46,38 +46,44 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
 
   const normalized = value.toLowerCase().trim();
   
-  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|cafe|chop|food stall|foodcourt)/.test(normalized)) {
-    // Return Food & Drinks category with subcategory
-    if (/(restaurant|chop|foodcourt|diner|eatery)/.test(normalized)) {
-      return { category: "Food & Drinks", subcategory: "Restaurants" };
+  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|chop|food stall|foodcourt|grocery|groceries|supermarket|market|puregold|savemore|savemall|s&r|hypermart|landmark|shopwise|robinsons supermarket|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza|bakery|bakeshop|rice|viand|lutong|ulam)/.test(normalized)) {
+    // Grocery/supermarket check first (before fast food) since keywords are explicit
+    if (/(grocery|groceries|supermarket|hypermart|market|puregold|savemore|savemall|s&r|landmark|shopwise)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Groceries" };
     }
-    if (/(coffee|cafe|drink|beverage|smoothie|juice|soda)/.test(normalized)) {
-      return { category: "Food & Drinks", subcategory: "Drinks" };
-    }
-    if (/(fast food|fastfood|mcdonald|burger|kfc|jollibee|pizza)/.test(normalized)) {
+    if (/(fast food|fastfood|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza hut|greenwich|shakeys)/.test(normalized)) {
       return { category: "Food & Drinks", subcategory: "Fast Food" };
     }
-    if (/(grocery|groceries|market|supermarket|s&r|puregold|savemall)/.test(normalized)) {
-      return { category: "Food & Drinks", subcategory: "Groceries" };
+    if (/(bakery|bakeshop|pandesal|bread|pastry|cake shop)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Bakery" };
+    }
+    if (/(coffee|cafe|drink|beverage|smoothie|juice|soda|milk tea|boba)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Drinks" };
+    }
+    if (/(restaurant|chop|foodcourt|diner|eatery|dining|carinderia|lutong|ulam|rice|viand|pizza)/.test(normalized)) {
+      return { category: "Food & Drinks", subcategory: "Restaurants" };
     }
     return { category: "Food & Drinks", subcategory: "Other Food & Drinks" };
   }
-  
-  if (/(transport|travel|transit|fare|ticket|bus|train|taxi|ride|uber|grab|jeep|tricycle)/.test(normalized)) {
-    if (/(public transit|bus|train|mrt|lrt|brt|jeep)/.test(normalized)) {
-      return { category: "Transport", subcategory: "Public Transit" };
-    }
-    if (/(uber|grab|ride|rideshare)/.test(normalized)) {
+
+  if (/(transport|travel|transit|fare|ticket|bus|train|taxi|ride|uber|grab|jeep|tricycle|gas|fuel|petrol|petron|shell|caltex|phoenix gas|parking|toll|mechanic|car|motorcycle|bike)/.test(normalized)) {
+    if (/(uber|grab|ride|rideshare|joyride|angkas)/.test(normalized)) {
       return { category: "Transport", subcategory: "Ride-Sharing" };
     }
     if (/taxi/.test(normalized)) {
       return { category: "Transport", subcategory: "Taxi" };
     }
-    if (/(gas|fuel|petrol)/.test(normalized)) {
+    if (/(gas|fuel|petrol|diesel|petron|shell|caltex|phoenix)/.test(normalized)) {
       return { category: "Transport", subcategory: "Gas/Fuel" };
     }
     if (/parking/.test(normalized)) {
       return { category: "Transport", subcategory: "Parking" };
+    }
+    if (/(mechanic|auto shop|car repair|oil change|car maintenance|vulcanizing)/.test(normalized)) {
+      return { category: "Transport", subcategory: "Car Maintenance" };
+    }
+    if (/(public transit|bus|train|mrt|lrt|brt|jeep|tricycle|fare|beep|toll)/.test(normalized)) {
+      return { category: "Transport", subcategory: "Public Transit" };
     }
     return { category: "Transport", subcategory: "Other" };
   }
@@ -105,19 +111,60 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
     return { category: "Entertainment", subcategory: "Movies & Streaming" };
   }
   
-  if (/(shopping|clothing|shoes|slippers|sandals|sneakers|footwear|cosmetics|beauty|electronics|Mall|store|shop)/.test(normalized)) {
-    if (/(clothing|clothes|dress|shirt|pants|jacket|blouse|shorts|skirt|uniform|slippers|sandals|sneakers|footwear|shoes|boots|heels|flats)/.test(normalized)) {
-      return { category: "Shopping & Personal", subcategory: "Clothing" };
-    }
-    if (/(cosmetics|beauty|makeup|skincare)/.test(normalized)) {
-      return { category: "Shopping & Personal", subcategory: "Cosmetics & Beauty" };
-    }
-    if (/(electronics|phone|laptop|computer|gadget)/.test(normalized)) {
-      return { category: "Shopping & Personal", subcategory: "Electronics" };
-    }
+  if (/(clothing|clothes|dress|shirt|pants|jacket|blouse|shorts|skirt|uniform|slippers|sandals|sneakers|footwear|shoes|boots|heels|flats|apparel|garment|fashion|textile|fabric)/.test(normalized)) {
+    return { category: "Shopping & Personal", subcategory: "Clothing" };
+  }
+
+  if (/(cosmetics|beauty|makeup|lipstick|foundation|skincare|face wash|moisturizer|sunscreen|shampoo|conditioner|lotion|perfume|cologne|deodorant|salon|spa|nail)/.test(normalized)) {
+    return { category: "Shopping & Personal", subcategory: "Cosmetics & Beauty" };
+  }
+
+  if (/(electronics|phone|laptop|computer|tablet|charger|cable|headphones|earbuds|speaker|gadget|smart device)/.test(normalized)) {
+    return { category: "Shopping & Personal", subcategory: "Electronics" };
+  }
+
+  if (/(bag|purse|wallet|belt|watch|jewelry|necklace|bracelet|ring|keychain|scarf|hat|sunglasses|eyeglasses|frames)/.test(normalized)) {
     return { category: "Shopping & Personal", subcategory: "Accessories" };
   }
   
+  if (/(meralco|electric|kuryente|electricity|maynilad|manila water|water bill|globe|smart|dito|sun cellular|pldt|internet|broadband|wifi|phone bill|load|rent|condo|apartment|mortgage|lease|home repair|plumbing|hardware|furniture|home depot)/.test(normalized)) {
+    if (/(meralco|electric|kuryente|electricity)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Electricity" };
+    }
+    if (/(maynilad|manila water|water bill)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Water" };
+    }
+    if (/(internet|broadband|wifi|pldt|globe fiber|converge)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Internet" };
+    }
+    if (/(globe|smart|dito|sun|phone bill|load|prepaid|postpaid)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Phone Bill" };
+    }
+    if (/(rent|condo|apartment|mortgage|lease)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Rent/Mortgage" };
+    }
+    if (/(repair|plumbing|hardware|construction|renovation)/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Home Repair" };
+    }
+    if (/furniture/.test(normalized)) {
+      return { category: "Utilities & Home", subcategory: "Furniture" };
+    }
+    return { category: "Utilities & Home", subcategory: "Electricity" };
+  }
+
+  if (/(school|university|college|tuition|enrollment|textbook|school supplies|notebook|pen|pencil|backpack|online course|lesson|training fee)/.test(normalized)) {
+    if (/(tuition|enrollment|school fee|registration fee)/.test(normalized)) {
+      return { category: "Education", subcategory: "Tuition" };
+    }
+    if (/(textbook|school supplies|notebook|pen|pencil|backpack|paper)/.test(normalized)) {
+      return { category: "Education", subcategory: "Books & Materials" };
+    }
+    if (/(online course|udemy|coursera|lesson|training)/.test(normalized)) {
+      return { category: "Education", subcategory: "Online Courses" };
+    }
+    return { category: "Education", subcategory: "Supplies" };
+  }
+
   if (/(uncategorized|other|unknown|misc|miscellaneous)/.test(normalized)) {
     return { category: "Other", subcategory: "Uncategorized" };
   }
@@ -447,13 +494,58 @@ function extractMerchant(text: string) {
 }
 
 function extractDate(text: string): string | undefined {
-  const dateMatch = text.match(/(\d{4}-\d{2}-\d{2}|\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/);
-  if (!dateMatch) {
-    return undefined;
+  const patterns = [
+    // YYYY-MM-DD or YYYY/MM/DD (with optional time)
+    /\b(\d{4}[\/\-]\d{2}[\/\-]\d{2})(?:\s+\d{2}:\d{2})?/,
+    // Full month name: April 04, 2026 or April 4 2026
+    /\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b/i,
+    // Short month name: Apr 04, 2026 or 04 Apr 2026
+    /\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\b/i,
+    /\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b/i,
+    // DD/MM/YYYY or MM/DD/YYYY (4-digit year)
+    /\b(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/,
+    // DD/MM/YY or MM/DD/YY (2-digit year)
+    /\b(\d{2}[\/\-]\d{2}[\/\-]\d{2})\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+
+    let raw = match[1].replace(/\//g, "-");
+
+    // Handle DD-MM-YYYY: if first segment > 12 it must be the day
+    const numeric = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (numeric) {
+      const [, a, b, year] = numeric;
+      const aNum = parseInt(a, 10);
+      const bNum = parseInt(b, 10);
+      if (aNum > 12 && bNum <= 12) {
+        // DD-MM-YYYY → reorder to YYYY-MM-DD
+        raw = `${year}-${b}-${a}`;
+      } else {
+        // Assume MM-DD-YYYY (or ambiguous — JS Date handles MM/DD natively)
+        raw = `${year}-${a}-${b}`;
+      }
+    }
+
+    // Expand 2-digit year: DD-MM-YY
+    const shortYear = raw.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+    if (shortYear) {
+      const [, a, b, yy] = shortYear;
+      const year = parseInt(yy, 10) < 50 ? `20${yy}` : `19${yy}`;
+      const aNum = parseInt(a, 10);
+      const bNum = parseInt(b, 10);
+      raw = aNum > 12 && bNum <= 12 ? `${year}-${b}-${a}` : `${year}-${a}-${b}`;
+    }
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
   }
 
-  const parsedDate = new Date(dateMatch[1]);
-  return Number.isNaN(parsedDate.getTime()) ? undefined : parsedDate.toISOString();
+  return undefined;
 }
 
 function inferCategory(text: string): { category?: string; subcategory?: string } {
