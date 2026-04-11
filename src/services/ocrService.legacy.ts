@@ -46,9 +46,9 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
 
   const normalized = value.toLowerCase().trim();
   
-  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|chop|food stall|foodcourt|grocery|groceries|supermarket|market|puregold|savemore|savemall|s&r|hypermart|landmark|shopwise|robinsons supermarket|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza|bakery|bakeshop|rice|viand|lutong|ulam)/.test(normalized)) {
+  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|chop|food stall|foodcourt|grocery|groceries|supermarket|market|puregold|savemore|savemall|s&r|hypermart|landmark|shopwise|robinsons supermarket|alfamart|ministop|7-eleven|711|family mart|lawson|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza|bakery|bakeshop|rice|viand|lutong|ulam)/.test(normalized)) {
     // Grocery/supermarket check first (before fast food) since keywords are explicit
-    if (/(grocery|groceries|supermarket|hypermart|market|puregold|savemore|savemall|s&r|landmark|shopwise)/.test(normalized)) {
+    if (/(grocery|groceries|supermarket|hypermart|market|puregold|savemore|savemall|s&r|landmark|shopwise|alfamart|ministop|7-eleven|711|family mart|lawson)/.test(normalized)) {
       return { category: "Food & Drinks", subcategory: "Groceries" };
     }
     if (/(fast food|fastfood|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza hut|greenwich|shakeys)/.test(normalized)) {

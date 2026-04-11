@@ -58,8 +58,8 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
   if (!value) return {};
   const normalized = value.toLowerCase().trim();
 
-  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|chop|food stall|foodcourt|grocery|groceries|supermarket|market|puregold|savemore|savemall|s&r|hypermart|landmark|shopwise|robinsons supermarket|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza|bakery|bakeshop|rice|viand|lutong|ulam)/.test(normalized)) {
-    if (/(grocery|groceries|supermarket|hypermart|market|puregold|savemore|savemall|s&r|landmark|shopwise)/.test(normalized)) {
+  if (/(food|restaurant|dining|coffee|cafe|drink|beverage|chop|food stall|foodcourt|grocery|groceries|supermarket|market|puregold|savemore|savemall|s&r|hypermart|landmark|shopwise|robinsons supermarket|alfamart|ministop|7-eleven|711|family mart|lawson|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza|bakery|bakeshop|rice|viand|lutong|ulam)/.test(normalized)) {
+    if (/(grocery|groceries|supermarket|hypermart|market|puregold|savemore|savemall|s&r|landmark|shopwise|alfamart|ministop|7-eleven|711|family mart|lawson)/.test(normalized)) {
       return { category: "Food & Drinks", subcategory: "Groceries" };
     }
     if (/(fast food|fastfood|jollibee|mcdonald|burger|kfc|chowking|wendy|popeye|pizza hut|greenwich|shakeys)/.test(normalized)) {
@@ -353,7 +353,8 @@ export async function processReceiptWithAI(
   const result = await pollTabScanner(token);
 
   const amount = parseTabScannerAmount(result.total);
-  const incurredAt = parseTabScannerDate(result.date);
+  // Always use today's date — receipt dates are often misprinted or wrong
+  const incurredAt = new Date().toISOString();
   const merchant = result.establishment?.trim().slice(0, 80) || undefined;
 
   // Build a text summary for category inference and rawText storage
