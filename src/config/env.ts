@@ -42,7 +42,8 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   OPENAI_API_KEY: z.string().optional(),
   REDIS_URL: z.string().optional(),
-  TABSCANNER_API_KEY: z.string().optional()
+  TABSCANNER_API_KEY: z.string().optional(),
+  ADMIN_SECRET: z.string().min(8).default("change-admin-secret")
 });
 
 export const env = envSchema.parse(process.env);

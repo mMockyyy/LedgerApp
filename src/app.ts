@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { ZodError } from "zod";
 import { env } from "./config/env";
+import { adminRouter } from "./routes/adminRoutes";
 import { authRouter } from "./routes/authRoutes";
 import { budgetRouter } from "./routes/budgetRoutes";
 import { chatRouter } from "./routes/chatRoutes";
@@ -28,6 +29,7 @@ app.use("/receipts", receiptRouter);
 app.use("/budgets", budgetRouter);
 app.use("/insights", insightsRouter);
 app.use("/chat", chatRouter);
+app.use("/admin", adminRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {
