@@ -201,14 +201,45 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   return res.json(payload);
 }));
 
+function verifyEmailHtml(success: boolean, message: string): string {
+  const color = success ? "#22c55e" : "#ef4444";
+  const icon = success ? "✓" : "✗";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${success ? "Email Verified" : "Verification Failed"}</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; max-width: 400px; width: 90%; text-align: center; }
+    .icon { font-size: 48px; color: ${color}; margin-bottom: 16px; }
+    h1 { font-size: 22px; color: #111; margin: 0 0 12px; }
+    p { color: #555; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+    .hint { font-size: 13px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h1>${success ? "Email Verified!" : "Verification Failed"}</h1>
+    <p>${message}</p>
+    <p class="hint">You can close this tab and go back to the app.</p>
+  </div>
+</body>
+</html>`;
+}
+
 /**
  * Verify email with token from verification link
  */
 authRouter.get("/verify-email", asyncHandler(async (req, res) => {
   const { token } = req.query;
+  const wantsJson = req.headers.accept?.includes("application/json");
 
   if (!token || typeof token !== "string") {
-    return res.status(400).json({ message: "Verification token is required" });
+    if (wantsJson) return res.status(400).json({ message: "Verification token is required" });
+    return res.status(400).send(verifyEmailHtml(false, "Verification token is missing."));
   }
 
   // Hash the token to find the user
@@ -220,9 +251,12 @@ authRouter.get("/verify-email", asyncHandler(async (req, res) => {
   });
 
   if (!user) {
-    return res.status(400).json({
-      message: "Invalid or expired verification token. Please register again to get a new verification link."
-    });
+    if (wantsJson) {
+      return res.status(400).json({
+        message: "Invalid or expired verification token. Please register again to get a new verification link."
+      });
+    }
+    return res.status(400).send(verifyEmailHtml(false, "This verification link is invalid or has expired. Please request a new one from the app."));
   }
 
   // Mark email as verified and clear token
@@ -231,10 +265,51 @@ authRouter.get("/verify-email", asyncHandler(async (req, res) => {
   user.emailVerificationTokenExpires = undefined;
   await user.save();
 
-  const payload = authVerifyEmailResponseSchema.parse({
-    message: "Email verified successfully! You can now log in."
-  });
-  return res.json(payload);
+  if (wantsJson) {
+    const payload = authVerifyEmailResponseSchema.parse({
+      message: "Email verified successfully! You can now log in."
+    });
+    return res.json(payload);
+  }
+  return res.send(verifyEmailHtml(true, "Your email has been verified. You can now log in to LedgerApp."));
+}));
+
+const resendVerificationSchema = z.object({
+  email: z.string().email()
+});
+
+authRouter.post("/resend-verification", asyncHandler(async (req, res) => {
+  const body = resendVerificationSchema.parse(req.body);
+  const normalizedEmail = body.email.toLowerCase();
+
+  const user = await User.findOne({ email: normalizedEmail });
+
+  // Return 200 for unknown email or already-verified to prevent enumeration
+  if (!user || user.isEmailVerified) {
+    return res.status(200).json({ message: "If that email exists and is unverified, a new link has been sent." });
+  }
+
+  // Rate-limit: don't allow resend within 60 seconds of last token issuance
+  if (user.emailVerificationTokenExpires) {
+    const tokenAge = Date.now() - (user.emailVerificationTokenExpires.getTime() - 24 * 60 * 60 * 1000);
+    if (tokenAge < 60 * 1000) {
+      return res.status(429).json({ message: "Please wait a moment before requesting another verification email." });
+    }
+  }
+
+  const { token, hash } = generateVerificationToken();
+  user.emailVerificationToken = hash;
+  user.emailVerificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await user.save();
+
+  try {
+    await sendVerificationEmail(user.email, token);
+  } catch (error) {
+    console.error("Failed to resend verification email:", error);
+    return res.status(502).json({ message: "Could not send verification email. Please try again later." });
+  }
+
+  return res.status(200).json({ message: "If that email exists and is unverified, a new link has been sent." });
 }));
 
 authRouter.post("/google/callback", asyncHandler(async (req, res) => {
