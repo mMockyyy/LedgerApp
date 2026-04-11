@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { env } from "./config/env";
 import { authRouter } from "./routes/authRoutes";
 import { budgetRouter } from "./routes/budgetRoutes";
+import { chatRouter } from "./routes/chatRoutes";
 import { expenseRouter } from "./routes/expenseRoutes";
 import { healthRouter } from "./routes/healthRoutes";
 import { insightsRouter } from "./routes/insightsRoutes";
@@ -26,6 +27,7 @@ app.use("/expenses", expenseRouter);
 app.use("/receipts", receiptRouter);
 app.use("/budgets", budgetRouter);
 app.use("/insights", insightsRouter);
+app.use("/chat", chatRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {
