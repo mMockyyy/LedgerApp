@@ -19,16 +19,24 @@ const createExpenseSchema = z.object({
   }),
   merchant: z.string().optional(),
   note: z.string().optional(),
-  incurredAt: z.string().datetime()
+  incurredAt: z.string().datetime(),
+  receiptId: z.string().optional()
 });
 
 expenseRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
   const body = createExpenseSchema.parse(req.body);
 
+  // If a receiptId is provided, this is a user-confirmed OCR expense.
+  // Remove any auto-created expense from the OCR pipeline for this receipt
+  // to avoid duplicates, then create the confirmed one with source="ocr".
+  if (body.receiptId) {
+    await Expense.deleteOne({ receiptId: body.receiptId, userId: req.userId });
+  }
+
   const expense = await Expense.create({
     ...body,
     incurredAt: new Date(body.incurredAt),
-    source: "manual",
+    source: body.receiptId ? "ocr" : "manual",
     userId: req.userId
   });
 
