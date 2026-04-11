@@ -135,3 +135,16 @@ receiptRouter.get("/:id/status", requireAuth, asyncHandler(async (req, res) => {
   });
   return res.json(payload);
 }));
+
+receiptRouter.delete("/:id", requireAuth, asyncHandler(async (req, res) => {
+  const receipt = await Receipt.findOne({ _id: req.params.id, userId: req.userId });
+  if (!receipt) {
+    return res.status(404).json({ message: "Receipt not found" });
+  }
+
+  // Also delete the linked expense if one was created from this receipt
+  await Expense.deleteOne({ receiptId: receipt._id, userId: req.userId });
+  await receipt.deleteOne();
+
+  return res.json({ message: "Receipt deleted." });
+}));
