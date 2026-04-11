@@ -41,7 +41,8 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true"),
   OPENAI_API_KEY: z.string().optional(),
-  REDIS_URL: z.string().optional()
+  REDIS_URL: z.string().optional(),
+  TABSCANNER_API_KEY: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);
