@@ -490,12 +490,16 @@ export async function processReceiptWithAI(
   // Build a text summary for category inference and rawText storage
   const extractedText = buildExtractedText(result);
 
-  // Infer category from merchant name + line item descriptions
-  const categoryContext = [
-    merchant,
-    ...(result.lineItems?.map((i) => i.description).filter(Boolean) ?? [])
-  ].join(" ");
-  const { category, subcategory } = normalizeCategory(categoryContext);
+  // Infer category: try merchant name alone first so known brands (e.g. Alfamart)
+  // always win over line-item keywords (e.g. "pizza", "grill") that might fire
+  // the wrong subcategory when OCR partially misreads the merchant header.
+  const merchantMatch = normalizeCategory(merchant);
+  const { category, subcategory } = (merchantMatch.subcategory && merchantMatch.subcategory !== "Uncategorized")
+    ? merchantMatch
+    : normalizeCategory([
+        merchant,
+        ...(result.lineItems?.map((i) => i.description).filter(Boolean) ?? [])
+      ].join(" "));
 
   // Sanity check: if TabScanner returned almost nothing, treat as failed
   if (!amount && !merchant) {
