@@ -1,6 +1,5 @@
 import { Router } from "express";
 import multer from "multer";
-import mongoose from "mongoose";
 import {
   receiptStatusResponseSchema,
   receiptUploadDisabledResponseSchema,
@@ -46,23 +45,7 @@ async function processReceiptInBackground(params: {
       llmAttempted: parsed.llmAttempted,
       llmSucceeded: parsed.llmSucceeded
     };
-    await Promise.all([
-      receipt.save(),
-      ...(typeof parsed.amount === "number"
-        ? [Expense.create({
-            userId: new mongoose.Types.ObjectId(params.userId),
-            amount: parsed.amount,
-            currency: "PHP",
-            category: parsed.category || "Other",
-            subcategory: parsed.subcategory || "Uncategorized",
-            merchant: parsed.merchant,
-            incurredAt: parsed.incurredAt ? new Date(parsed.incurredAt) : new Date(),
-            source: "ocr",
-            receiptId: receipt._id,
-            rawText: parsed.extractedText
-          })]
-        : [])
-    ]);
+    await receipt.save();
   } catch (error) {
     receipt.status = "failed";
     if (error instanceof Error && error.message === "NOT_A_RECEIPT") {
