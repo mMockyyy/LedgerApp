@@ -541,8 +541,8 @@ export async function processReceiptWithAI(
   } else {
     amount = parseTabScannerAmount(result.total);
   }
-  // Always use today's date — receipt dates are often misprinted or wrong
-  const incurredAt = new Date().toISOString();
+  // Use the date from the receipt if TabScanner returned one; fall back to today.
+  const incurredAt = parseTabScannerDate(result.date) ?? new Date().toISOString();
   const merchant = result.establishment?.trim().slice(0, 80) || undefined;
 
   // Build a text summary for category inference and rawText storage
