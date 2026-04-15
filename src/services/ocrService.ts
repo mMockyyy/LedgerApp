@@ -431,7 +431,16 @@ function isBusTicket(result: TabScannerResult): boolean {
     result.establishment ?? "",
     ...(result.lineItems?.map((i) => i.description ?? "") ?? [])
   ].join(" ").toLowerCase();
-  return /faretype|amount\s*due|vehicle\s*name|device\s*name|conductor|from\s*:\s*\d|to\s*:\s*\d/.test(allText);
+  // Primary signals: bus-ticket-specific fields
+  if (/faretype|amount\s*due|vehicle\s*name|device\s*name|conductor|from\s*:\s*\d|to\s*:\s*\d/.test(allText)) {
+    return true;
+  }
+  // Secondary: known PH bus operator names in the establishment field
+  const est = (result.establishment ?? "").toLowerCase();
+  if (/\b(santrans|del\s*monte|sps|rts|jac\s*liner|victory\s*liner|genesis\s*transport|five\s*star|bltb|partas|farinas|dagupan\s*bus|baliwag|saulog|solid\s*north|solid\s*luzon|phl\s*transit)\b/.test(est)) {
+    return true;
+  }
+  return false;
 }
 
 function extractBusTicketAmount(result: TabScannerResult): number | undefined {
@@ -543,15 +552,23 @@ export async function processReceiptWithAI(
   // always win over line-item keywords (e.g. "pizza", "grill") that might fire
   // the wrong subcategory when OCR partially misreads the merchant header.
   const merchantMatch = normalizeCategory(merchant);
-  const { category, subcategory } = (merchantMatch.subcategory && merchantMatch.subcategory !== "Uncategorized")
+  let { category, subcategory } = (merchantMatch.subcategory && merchantMatch.subcategory !== "Uncategorized")
     ? merchantMatch
     : normalizeCategory([
         merchant,
         ...(result.lineItems?.map((i) => i.description).filter(Boolean) ?? [])
       ].join(" "));
 
-  // Sanity check: if TabScanner returned almost nothing, treat as failed
-  if (!amount && !merchant) {
+  // Bus tickets: TabScanner often returns no establishment name, so normalizeCategory
+  // gets nothing and falls back to Other > Uncategorized. Override it here.
+  if ((!category || category === "Other") && isBusTicket(result)) {
+    category = "Transport";
+    subcategory = "Public Transit";
+  }
+
+  // Sanity check: if TabScanner returned almost nothing, treat as failed.
+  // For bus tickets, amount may be missing but merchant could still be valid.
+  if (!amount && !merchant && !isBusTicket(result)) {
     throw new Error("NOT_A_RECEIPT");
   }
 
