@@ -526,13 +526,19 @@ export async function processReceiptWithAI(
   const token = await submitToTabScanner(fileName, mimeType, buffer);
   const result = await pollTabScanner(token);
 
-  // Bus tickets: TabScanner may pick up ticket numbers or time digits as the
-  // total. Try to extract the real fare from "Amount Due" in line items first;
-  // fall back to TabScanner's total if nothing better is found.
+  // Bus tickets: TabScanner doesn't understand the "Amount Due" format on PH
+  // bus/jeepney tickets. If we detect a bus ticket but TabScanner returned no
+  // usable amount, hand the image off to the legacy pipeline which runs its own
+  // OCR and has an "amount due" regex that handles this correctly.
   const busTicket = isBusTicket(result);
-  const amount = busTicket
+  let amount = busTicket
     ? (extractBusTicketAmount(result) ?? parseTabScannerAmount(result.total))
     : parseTabScannerAmount(result.total);
+
+  if (busTicket && !amount) {
+    const { processReceiptWithAI: legacyProcess } = await import("./ocrService.legacy");
+    return legacyProcess(fileName, mimeType, buffer);
+  }
   // Use the date from the receipt if TabScanner returned one; fall back to today.
   const incurredAt = parseTabScannerDate(result.date) ?? new Date().toISOString();
   const merchant = result.establishment?.trim().slice(0, 80) || undefined;
