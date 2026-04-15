@@ -82,10 +82,10 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
     if (/(mechanic|auto shop|car repair|oil change|car maintenance|vulcanizing)/.test(normalized)) {
       return { category: "Transport", subcategory: "Car Maintenance" };
     }
-    if (/(public transit|bus|train|mrt|lrt|brt|jeep|tricycle|fare|beep|toll)/.test(normalized)) {
+    if (/(public transit|bus|train|mrt|lrt|brt|jeep|tricycle|fare|beep|toll|del monte|santrans|sps|rts|jac liner|victory liner|genesis|five star|bltb|partas|faretype|amount due)/.test(normalized)) {
       return { category: "Transport", subcategory: "Public Transit" };
     }
-    return { category: "Transport", subcategory: "Other" };
+    return { category: "Transport", subcategory: "Public Transit" };
   }
   
   if (/(mercury[\s-]?drug|watsons?|rose[\s-]?pharmacy|southstar[\s-]?drug|generika|health|medical|pharmacy|clinic|hospital|doctor|dental|gym|fitness|medicine|drugstore|biogesic|decolgen|neozep|diatabs|bactidol|kremil|loperamide|ascorbic|paracetamol|antibiotic|vitamin|supplement)/.test(normalized)) {

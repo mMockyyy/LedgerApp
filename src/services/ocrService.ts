@@ -123,6 +123,12 @@ function normalizeCategory(value?: string): { category?: string; subcategory?: s
     return { category: "Transport", subcategory: "Public Transit" };
   }
 
+  // ── Philippine bus operators ───────────────────────────────────────────────
+  // These print branded tickets (DEL MONTE, SPS, SANTRANS, etc.) with FARETYPE field
+  if (/\b(del\s*monte|santrans|sps|rts|jac\s*liner|victory\s*liner|genesis|five\s*star|first\s*north\s*luzon|bltb|partas|farinas|dagupan\s*bus|nueva\s*ecija|baliwag|saulog|batangas\s*laguna|phl\s*transit|solid\s*north|solid\s*luzon|faretype|amount\s*due)\b/.test(n)) {
+    return { category: "Transport", subcategory: "Public Transit" };
+  }
+
   // ── General transport ─────────────────────────────────────────────────────
   if (/\b(transport|travel\s*fare|commute|fare|ticket\s*(fare)?)\b/.test(n)) {
     return { category: "Transport", subcategory: "Public Transit" };
@@ -417,6 +423,35 @@ function parseTabScannerAmount(value?: number | string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+// Bus/jeepney tickets use "Amount Due : P63" format which TabScanner doesn't
+// recognise as a standard receipt total. It often returns the ticket number,
+// vehicle number, or time digits as the total instead.
+function isBusTicket(result: TabScannerResult): boolean {
+  const allText = [
+    result.establishment ?? "",
+    ...(result.lineItems?.map((i) => i.description ?? "") ?? [])
+  ].join(" ").toLowerCase();
+  return /faretype|amount\s*due|vehicle\s*name|device\s*name|conductor|from\s*:\s*\d|to\s*:\s*\d/.test(allText);
+}
+
+function extractBusTicketAmount(result: TabScannerResult): number | undefined {
+  for (const item of result.lineItems ?? []) {
+    if (!item.description) continue;
+    // Match "Amount Due : P63" or "Amount Due: 63.00" etc.
+    const m = item.description.match(/amount\s*due\s*[:\-]?\s*[₱P]?\s*(\d+(?:\.\d{1,2})?)/i);
+    if (m) {
+      const val = parseFloat(m[1]);
+      if (Number.isFinite(val) && val > 0 && val < 10000) return val;
+    }
+    // Also handle if TabScanner structured the amount into item.amount
+    if (/amount\s*due/i.test(item.description) && item.amount !== undefined) {
+      const val = parseTabScannerAmount(item.amount);
+      if (val !== undefined && val < 10000) return val;
+    }
+  }
+  return undefined;
+}
+
 function parseTabScannerDate(value?: string): string | undefined {
   if (!value) return undefined;
 
@@ -482,7 +517,21 @@ export async function processReceiptWithAI(
   const token = await submitToTabScanner(fileName, mimeType, buffer);
   const result = await pollTabScanner(token);
 
-  const amount = parseTabScannerAmount(result.total);
+  // Bus/jeepney tickets confuse TabScanner — it picks up ticket numbers or
+  // time digits (e.g. 19:55:44 → 19) instead of the actual "Amount Due" fare.
+  // Detect and fix before we use the total.
+  let amount: number | undefined;
+  if (isBusTicket(result)) {
+    amount = extractBusTicketAmount(result);
+    // If we couldn't find Amount Due in line items, try TabScanner's total only
+    // when it looks like a realistic fare (≤ 500 PHP).
+    if (amount === undefined) {
+      const tsAmount = parseTabScannerAmount(result.total);
+      if (tsAmount !== undefined && tsAmount <= 500) amount = tsAmount;
+    }
+  } else {
+    amount = parseTabScannerAmount(result.total);
+  }
   // Always use today's date — receipt dates are often misprinted or wrong
   const incurredAt = new Date().toISOString();
   const merchant = result.establishment?.trim().slice(0, 80) || undefined;
