@@ -526,21 +526,13 @@ export async function processReceiptWithAI(
   const token = await submitToTabScanner(fileName, mimeType, buffer);
   const result = await pollTabScanner(token);
 
-  // Bus/jeepney tickets confuse TabScanner — it picks up ticket numbers or
-  // time digits (e.g. 19:55:44 → 19) instead of the actual "Amount Due" fare.
-  // Detect and fix before we use the total.
-  let amount: number | undefined;
-  if (isBusTicket(result)) {
-    amount = extractBusTicketAmount(result);
-    // If we couldn't find Amount Due in line items, try TabScanner's total only
-    // when it looks like a realistic fare (≤ 500 PHP).
-    if (amount === undefined) {
-      const tsAmount = parseTabScannerAmount(result.total);
-      if (tsAmount !== undefined && tsAmount <= 500) amount = tsAmount;
-    }
-  } else {
-    amount = parseTabScannerAmount(result.total);
-  }
+  // Bus tickets: TabScanner may pick up ticket numbers or time digits as the
+  // total. Try to extract the real fare from "Amount Due" in line items first;
+  // fall back to TabScanner's total if nothing better is found.
+  const busTicket = isBusTicket(result);
+  const amount = busTicket
+    ? (extractBusTicketAmount(result) ?? parseTabScannerAmount(result.total))
+    : parseTabScannerAmount(result.total);
   // Use the date from the receipt if TabScanner returned one; fall back to today.
   const incurredAt = parseTabScannerDate(result.date) ?? new Date().toISOString();
   const merchant = result.establishment?.trim().slice(0, 80) || undefined;
@@ -561,14 +553,14 @@ export async function processReceiptWithAI(
 
   // Bus tickets: TabScanner often returns no establishment name, so normalizeCategory
   // gets nothing and falls back to Other > Uncategorized. Override it here.
-  if ((!category || category === "Other") && isBusTicket(result)) {
+  if ((!category || category === "Other") && busTicket) {
     category = "Transport";
     subcategory = "Public Transit";
   }
 
   // Sanity check: if TabScanner returned almost nothing, treat as failed.
   // For bus tickets, amount may be missing but merchant could still be valid.
-  if (!amount && !merchant && !isBusTicket(result)) {
+  if (!amount && !merchant && !busTicket) {
     throw new Error("NOT_A_RECEIPT");
   }
 
